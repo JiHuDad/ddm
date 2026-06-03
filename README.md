@@ -28,6 +28,30 @@ if (driftmon_ready(mon)) {
 }
 ```
 
+## Prometheus export (선택)
+PSI를 Prometheus 텍스트 노출 포맷으로 내보내는 **선택 모듈**(`export/`). 코어는 여기에
+의존하지 않으며, 기본 OFF다. 켜서 빌드:
+```sh
+cmake -S . -B build -DDRIFTMON_ENABLE_PROMETHEUS=ON && cmake --build build
+```
+사용:
+```cpp
+#include "driftmon_export.h"
+double psi[K], maxp;
+driftmon_compute(mon, psi, &maxp);
+std::string body = dm::to_prometheus_text(feature_names,
+                                          {psi, psi + K}, maxp);
+// body를 기존 /metrics HTTP 핸들러로 그대로 서빙 (스크레이프 인프라 재사용).
+```
+출력 예:
+```
+driftmon_psi{feature="rsrp"} 0.0203
+driftmon_psi_max 0.28
+driftmon_drift_severity 2
+```
+prometheus-cpp 클라이언트(레지스트리/HTTP exposer/pushgateway)를 쓰고 싶으면, 같은
+`psi[]`/`maxp` 값을 그쪽 `Gauge().Set(...)`에 넣으면 된다 — 코어/이 어댑터 변경 불필요.
+
 ## 상태
-Phase 0 부트스트랩(계약·문서·빌드 골격·무의존 테스트 러너). 코어 알고리즘은 Phase 1+
-에서 구현 — 자세한 로드맵은 SPEC.md §8.
+Phase 0~3 완료: 계약·문서·빌드 골격(0), PSI 코어(1), 텀블링 윈도우·분류(2),
+Prometheus export 어댑터(3). 로드맵은 SPEC.md §8.

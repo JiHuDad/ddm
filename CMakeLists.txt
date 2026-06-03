@@ -33,7 +33,19 @@ target_link_libraries(driftmon_tests PRIVATE driftmon)
 target_include_directories(driftmon_tests PRIVATE tests)
 add_test(NAME driftmon_tests COMMAND driftmon_tests)
 
-# --- Phase 3 (export adapter) ----------------------------------------------
-# An optional Prometheus export module will live behind a build option here,
-# e.g. option(DRIFTMON_ENABLE_PROMETHEUS "Build prometheus-cpp gauge export" OFF).
-# The core library must NOT depend on it. Not implemented in Phase 0.
+# --- Phase 3: optional Prometheus export adapter ---------------------------
+# Default OFF: when OFF the core library and its tests are entirely unaffected.
+# The export module depends on the core (reuses driftmon_classify), never the
+# reverse. It is dependency-free (renders Prometheus text exposition format).
+option(DRIFTMON_ENABLE_PROMETHEUS "Build the Prometheus export adapter" OFF)
+
+if(DRIFTMON_ENABLE_PROMETHEUS)
+  add_library(driftmon_export STATIC export/driftmon_export.cpp)
+  target_include_directories(driftmon_export PUBLIC export)
+  target_link_libraries(driftmon_export PUBLIC driftmon)  # export -> core only
+
+  add_executable(driftmon_export_tests tests/test_export.cpp)
+  target_link_libraries(driftmon_export_tests PRIVATE driftmon_export)
+  target_include_directories(driftmon_export_tests PRIVATE tests)
+  add_test(NAME driftmon_export_tests COMMAND driftmon_export_tests)
+endif()
