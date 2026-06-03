@@ -234,6 +234,12 @@ def main(argv=None):
                         help="run built-in validation with synthetic data")
     args = parser.parse_args(argv)
 
+    # Validate numeric arguments early — before any I/O.
+    if args.buckets < 1:
+        parser.error("--buckets must be >= 1")
+    if args.window_size < 1:
+        parser.error("--window-size must be >= 1 (SPEC §3 requires window_size > 0)")
+
     if args.self_test:
         self_test(output=args.output)
         return 0
@@ -246,9 +252,11 @@ def main(argv=None):
         with open(args.input, newline="") as f:
             reader = csv.reader(f)
             try:
-                args.features = next(reader)
+                args.features = [c.strip() for c in next(reader) if c.strip()]
             except StopIteration:
                 sys.exit(f"error: {args.input} is empty")
+        if not args.features:
+            sys.exit(f"error: no feature columns found in header of {args.input}")
 
     out_path = args.output or "reference.json"
 

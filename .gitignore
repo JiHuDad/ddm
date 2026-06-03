@@ -18,4 +18,8 @@ Testing/
 .idea/
 *.swp
 .DS_Store
-tools/__pycache__/
+
+# Python bytecode (any directory)
+__pycache__/
+*.pyc
+*.pyo
