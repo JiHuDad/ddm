@@ -18,3 +18,4 @@ Testing/
 .idea/
 *.swp
 .DS_Store
+tools/__pycache__/

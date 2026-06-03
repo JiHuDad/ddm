@@ -49,3 +49,37 @@ if(DRIFTMON_ENABLE_PROMETHEUS)
   target_include_directories(driftmon_export_tests PRIVATE tests)
   add_test(NAME driftmon_export_tests COMMAND driftmon_export_tests)
 endif()
+
+# --- Phase 4: reference generation tools & integration tests ---------------
+# Default OFF. Requires python3. When ON:
+#   make_reference.py --self-test generates a reference.json from synthetic data;
+#   check_reference (C++) loads it via the core, completing the roundtrip.
+option(DRIFTMON_ENABLE_TOOLS "Build reference tools and roundtrip integration test" OFF)
+
+if(DRIFTMON_ENABLE_TOOLS)
+  add_executable(check_reference tools/check_reference.cpp)
+  target_link_libraries(check_reference PRIVATE driftmon)
+
+  find_program(PYTHON3 python3)
+  if(PYTHON3)
+    # Step 1: Python tool generates reference.json from synthetic data.
+    add_test(NAME ref_generate
+      COMMAND ${PYTHON3} ${CMAKE_SOURCE_DIR}/tools/make_reference.py
+              --self-test --output ${CMAKE_BINARY_DIR}/test_ref.json
+    )
+    set_tests_properties(ref_generate PROPERTIES FIXTURES_SETUP ref_json_fixture)
+
+    # Step 2: C++ loader round-trips the generated JSON via json_min (SPEC §3).
+    add_test(NAME ref_load_cpp
+      COMMAND $<TARGET_FILE:check_reference> ${CMAKE_BINARY_DIR}/test_ref.json
+    )
+    set_tests_properties(ref_load_cpp PROPERTIES FIXTURES_REQUIRED ref_json_fixture)
+
+    # Step 3: Python unit tests for the tool itself.
+    add_test(NAME test_make_reference
+      COMMAND ${PYTHON3} ${CMAKE_SOURCE_DIR}/tests/test_make_reference.py
+    )
+  else()
+    message(WARNING "python3 not found — tools integration tests skipped")
+  endif()
+endif()
