@@ -88,6 +88,14 @@ void driftmon_compute(driftmon_t* m, double* psi_out, double* max_psi) {
         for (long c : m->window_counts[j]) feature_obs += c;
         const double denom = static_cast<double>(feature_obs);
 
+        // No valid observations for this feature (e.g. all NaN/Inf, or out of
+        // any window): drift is undefined, so report 0 rather than letting the
+        // epsilon floor manufacture a spurious high PSI (SPEC §2.4).
+        if (feature_obs == 0) {
+            if (psi_out != nullptr) psi_out[j] = 0.0;
+            continue;
+        }
+
         double psi = 0.0;
         for (int k = 0; k < nb; ++k) {
             double e = ref_ratios[k];
@@ -101,6 +109,14 @@ void driftmon_compute(driftmon_t* m, double* psi_out, double* max_psi) {
         if (psi > max_val) max_val = psi;
     }
     if (max_psi != nullptr) *max_psi = max_val;
+}
+
+driftmon_severity_t driftmon_classify(double psi) {
+    // Thresholds per SPEC §2.3. NaN falls through to STABLE (both comparisons
+    // are false), which is the safe default for an undefined PSI.
+    if (psi >= 0.2) return DRIFTMON_SIGNIFICANT;
+    if (psi >= 0.1) return DRIFTMON_WARNING;
+    return DRIFTMON_STABLE;
 }
 
 void driftmon_reset(driftmon_t* m) {

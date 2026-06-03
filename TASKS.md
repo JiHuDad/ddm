@@ -25,12 +25,14 @@
 - [x] **테스트:** 알려진 분포로 PSI 값 검증 — 동일 분포 ≈ 0; 시프트 분포 > 0.2.
 - [x] **테스트:** 버킷 경계/빈 버킷/0 나눗셈 케이스 (SPEC §2.4).
 
-## Phase 2 — 윈도우 / 집계
-- [ ] **구현:** 윈도우 관리 — `driftmon_ready`(window_size 기준), `driftmon_reset`.
-      슬라이딩 vs 텀블링 결정은 SPEC에 먼저 확정.
-- [ ] **구현:** 임계값 플래그 — max PSI 대비 안정/주의/유의 분류 노출(필요 시 API는
-      합의 후).
-- [ ] **테스트:** 윈도우 경계, reset 후 상태, 연속 윈도우.
+## Phase 2 — 윈도우 / 집계 ✓
+- [x] **구현:** 윈도우 관리 — `driftmon_ready`(window_size 기준), `driftmon_reset`.
+      **텀블링 윈도우로 확정** (SPEC §2.5, 결정 로그).
+- [x] **구현:** 임계값 플래그 — `driftmon_classify` + `driftmon_severity_t` 추가
+      (하위호환, 결정 로그). 임계값 0.1/0.2 단일 출처를 라이브러리에 둠.
+- [x] **테스트:** 윈도우 경계, reset 후 상태, 연속 텀블링 윈도우, 분류 경계값.
+- [x] **버그 수정:** 유효 관측 0 특징이 epsilon floor로 허위 고PSI(≈8) 내던 문제 →
+      PSI=0 보고 (SPEC §2.4, 회귀 테스트 추가).
 
 ## Phase 3 — export 어댑터 (코어와 분리, 선택)
 - [ ] **구현:** prometheus-cpp gauge로 PSI 노출. `DRIFTMON_ENABLE_PROMETHEUS` 빌드

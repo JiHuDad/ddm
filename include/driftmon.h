@@ -21,6 +21,13 @@ extern "C" {
 /* Opaque handle. Layout is private to the implementation. */
 typedef struct driftmon driftmon_t;
 
+/* Drift severity per SPEC.md thresholds (§2.3). C ABI: values are stable ints. */
+typedef enum {
+    DRIFTMON_STABLE      = 0, /* PSI < 0.1  : no significant change */
+    DRIFTMON_WARNING     = 1, /* 0.1 <= PSI < 0.2 : moderate change */
+    DRIFTMON_SIGNIFICANT = 2  /* PSI >= 0.2 : significant drift     */
+} driftmon_severity_t;
+
 /*
  * Create a monitor from a reference profile (reference.json).
  * Runtime config (window_size, bucket layout, ref ratios) lives in the JSON,
@@ -51,6 +58,13 @@ int driftmon_ready(const driftmon_t* m);
  * features (the headline drift signal). Both out-params may be NULL to skip.
  */
 void driftmon_compute(driftmon_t* m, double* psi_out, double* max_psi);
+
+/*
+ * Classify a PSI value into a drift severity per SPEC.md thresholds.
+ * Stateless pure function (no handle needed); keeps the 0.1/0.2 thresholds in
+ * one place so callers don't hard-code them.
+ */
+driftmon_severity_t driftmon_classify(double psi);
 
 /* Clear the current window's accumulated observations (reference untouched). */
 void driftmon_reset(driftmon_t* m);

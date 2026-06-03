@@ -257,4 +257,73 @@ TEST(observe_wrong_n_is_noop) {
     driftmon_destroy(m);
 }
 
+// ─── Phase 2: zero-observation feature must not manufacture drift ────────────
+
+// Regression: a feature whose observations are all NaN (zero valid counts)
+// must report PSI=0, not a spurious high value from the epsilon floor.
+TEST(zero_observation_feature_psi_is_zero) {
+    std::string path = write_tmp("zero_obs", VALID_2F);  // 2 features
+    driftmon_t* m = driftmon_create(path.c_str());
+    CHECK(m != nullptr);
+
+    double nan_val = std::numeric_limits<double>::quiet_NaN();
+    // feature a: real data matching ref [0.5,0.3,0.2]; feature b: all NaN.
+    for (int i = 0; i < 5; ++i) { double f[2] = {0.5, nan_val}; driftmon_observe(m, f, 2); }
+    for (int i = 0; i < 3; ++i) { double f[2] = {1.5, nan_val}; driftmon_observe(m, f, 2); }
+    for (int i = 0; i < 2; ++i) { double f[2] = {2.5, nan_val}; driftmon_observe(m, f, 2); }
+
+    double psi[2], max_psi;
+    driftmon_compute(m, psi, &max_psi);
+    CHECK_NEAR(psi[0], 0.0, 1e-9);   // matches ref → ~0
+    CHECK_NEAR(psi[1], 0.0, 1e-12);  // no valid data → exactly 0 (the fix)
+    CHECK_NEAR(max_psi, 0.0, 1e-9);  // not polluted by feature b
+    driftmon_destroy(m);
+}
+
+// ─── Phase 2: threshold classification ───────────────────────────────────────
+
+TEST(classify_thresholds) {
+    CHECK(driftmon_classify(0.0)  == DRIFTMON_STABLE);
+    CHECK(driftmon_classify(0.05) == DRIFTMON_STABLE);
+    CHECK(driftmon_classify(0.1)  == DRIFTMON_WARNING);      // boundary inclusive
+    CHECK(driftmon_classify(0.15) == DRIFTMON_WARNING);
+    CHECK(driftmon_classify(0.2)  == DRIFTMON_SIGNIFICANT);  // boundary inclusive
+    CHECK(driftmon_classify(5.0)  == DRIFTMON_SIGNIFICANT);
+}
+
+TEST(classify_nan_is_stable) {
+    double nan_val = std::numeric_limits<double>::quiet_NaN();
+    CHECK(driftmon_classify(nan_val) == DRIFTMON_STABLE);
+}
+
+// ─── Phase 2: consecutive tumbling windows ───────────────────────────────────
+
+// Window 1 = reference distribution (PSI~0, stable). After reset, window 2 =
+// fully shifted (significant). Verifies tumbling: reset starts a clean window.
+TEST(consecutive_tumbling_windows) {
+    std::string path = write_tmp("tumbling", VALID_1F);  // window_size=10
+    driftmon_t* m = driftmon_create(path.c_str());
+    CHECK(m != nullptr);
+
+    // Window 1: matches reference.
+    double v;
+    for (int i = 0; i < 5; ++i) { v = 0.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 3; ++i) { v = 1.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 2; ++i) { v = 2.5; driftmon_observe(m, &v, 1); }
+    CHECK(driftmon_ready(m) != 0);
+    double max1;
+    driftmon_compute(m, nullptr, &max1);
+    CHECK(driftmon_classify(max1) == DRIFTMON_STABLE);
+
+    driftmon_reset(m);
+
+    // Window 2: all in bucket 0 → significant drift.
+    for (int i = 0; i < 10; ++i) { v = 0.5; driftmon_observe(m, &v, 1); }
+    CHECK(driftmon_ready(m) != 0);
+    double max2;
+    driftmon_compute(m, nullptr, &max2);
+    CHECK(driftmon_classify(max2) == DRIFTMON_SIGNIFICANT);
+    driftmon_destroy(m);
+}
+
 int main() { return RUN_ALL(); }

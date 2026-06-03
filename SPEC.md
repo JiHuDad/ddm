@@ -53,9 +53,12 @@ PSI = Σ_i ( a_i − e_i ) · ln( a_i / e_i )
 
 ### 2.3 임계값 (Thresholds)
 헤드라인 신호는 특징별 PSI의 **최댓값(max PSI)**:
-- `PSI < 0.1` → **안정** (유의한 변화 없음)
-- `0.1 ≤ PSI < 0.2` → **주의** (보통 수준의 변화)
-- `PSI ≥ 0.2` → **유의** (상당한 드리프트)
+- `PSI < 0.1` → **안정** (유의한 변화 없음) — `DRIFTMON_STABLE`
+- `0.1 ≤ PSI < 0.2` → **주의** (보통 수준의 변화) — `DRIFTMON_WARNING`
+- `PSI ≥ 0.2` → **유의** (상당한 드리프트) — `DRIFTMON_SIGNIFICANT`
+
+이 분류는 `driftmon_classify(double psi)`로 노출한다(§4). 임계값 상수의 단일
+출처를 라이브러리에 두어 호출자가 0.1/0.2를 하드코딩하지 않게 한다.
 
 ### 2.4 수치 안정성 규칙 (Numerical stability — 반드시 준수)
 PSI는 `ln(a/e)`와 나눗셈을 포함하므로 0을 다뤄야 한다.
@@ -64,7 +67,16 @@ PSI는 `ln(a/e)`와 나눗셈을 포함하므로 0을 다뤄야 한다.
 - **빈 버킷.** 위 floor로 자연히 처리된다 (0 → EPSILON).
 - **범위 밖 값.** `edges` 최솟값 미만은 첫 버킷에, 최댓값 이상은 마지막 버킷에 클램프.
 - **NaN/Inf 입력.** 해당 관측의 그 특징은 무시(카운트하지 않음)하되, 다른 특징은 정상
-  처리. (구현 시 SPEC 결정 로그에 동작 확정.)
+  처리. 관측 자체는 `driftmon_ready` 카운트에 포함된다.
+- **유효 관측 0인 특징.** 어떤 특징의 윈도우 내 유효 카운트 합이 0이면(예: 전부
+  NaN/Inf) 드리프트는 **정의되지 않으므로 PSI=0**으로 보고한다. (epsilon floor가
+  허위 고PSI를 만들지 않도록.) `a_i` 분모는 **특징별** 유효 카운트 합이다.
+
+### 2.5 윈도우 모델 (Windowing) — 텀블링(tumbling)
+- 코어는 **텀블링 윈도우**다. `driftmon_observe`가 관측을 누적하고,
+  `driftmon_ready`는 누적 관측 수 ≥ `window_size`일 때 nonzero.
+- 윈도우를 닫는 책임은 호출자에 있다: `ready`면 `compute` 후 `reset`을 호출해
+  다음 윈도우를 새로 시작한다. (슬라이딩 윈도우는 비목적 — 필요 시 별도 결정.)
 
 ---
 
@@ -100,15 +112,24 @@ PSI는 `ln(a/e)`와 나눗셈을 포함하므로 0을 다뤄야 한다.
 > **이 헤더는 동결(FROZEN)되어 있다. 합의 없이 수정 금지.** 변경이 필요하면 먼저 이
 > SPEC의 결정 로그(§7)에 제안·합의를 기록한 뒤에만 헤더를 고친다. 내부 구현은
 > 자유롭게 바꿔도 되지만 이 시그니처/의미는 양쪽 AI 툴이 의존하는 닻이다.
+> 기존 시그니처 변경/삭제는 금지. **하위호환 추가**(새 함수)는 결정 로그에 기록 후 허용.
 
 ```c
 typedef struct driftmon driftmon_t;
+
+/* 드리프트 심각도 — §2.3 임계값 */
+typedef enum {
+    DRIFTMON_STABLE      = 0,  /* PSI < 0.1 */
+    DRIFTMON_WARNING     = 1,  /* 0.1 <= PSI < 0.2 */
+    DRIFTMON_SIGNIFICANT = 2   /* PSI >= 0.2 */
+} driftmon_severity_t;
 
 driftmon_t* driftmon_create(const char* reference_json_path); // 실패 시 NULL
 int  driftmon_num_features(const driftmon_t* m);              // psi_out 길이 산정용
 void driftmon_observe (driftmon_t* m, const double* feats, int n); // 관측 1건 누적
 int  driftmon_ready   (const driftmon_t* m);                 // 윈도우 찼으면 nonzero
 void driftmon_compute (driftmon_t* m, double* psi_out, double* max_psi);
+driftmon_severity_t driftmon_classify(double psi);           // 임계값 분류(무상태)
 void driftmon_reset   (driftmon_t* m);                       // 현재 윈도우만 비움
 void driftmon_destroy (driftmon_t* m);                       // NULL 안전
 ```
@@ -119,8 +140,9 @@ void driftmon_destroy (driftmon_t* m);                       // NULL 안전
 - `driftmon_observe`: `feats`는 `n`개의 double. `n`은 `driftmon_num_features(m)`와 일치해야 함.
 - `driftmon_ready`: 누적 관측 수가 `window_size` 이상이면 nonzero.
 - `driftmon_compute`: `psi_out`(길이 ≥ num_features)에 특징별 PSI, `max_psi`에 최댓값.
-  두 out 인자 모두 NULL 가능(건너뜀).
-- `driftmon_reset`: 참조는 그대로 두고 현재 윈도우 누적만 초기화.
+  두 out 인자 모두 NULL 가능(건너뜀). 유효 관측 0인 특징은 PSI=0 (§2.4).
+- `driftmon_classify`: PSI 값을 §2.3 임계값으로 분류. 무상태 순수 함수(핸들 불필요).
+- `driftmon_reset`: 참조는 그대로 두고 현재 윈도우 누적만 초기화 (텀블링, §2.5).
 - `driftmon_destroy`: 모든 자원 해제. NULL 호출 안전.
 
 ---
@@ -158,6 +180,14 @@ ctest --test-dir build --output-on-failure       # 미니 러너 테스트 green
   테스트 러너까지. 테스트는 무의존 미니 러너(`tests/test_framework.h`), reference
   파싱은 최소 자체 JSON 파서(`src/json_min.*`). 헤더 동결. 원안 대비
   `driftmon_num_features` 추가(psi_out 길이 안전 산정).
+- **2026-06-03 — Phase 1 코어 구현.** PSI/히스토그램/JSON 로더 완성. EPSILON=1e-4 확정.
+- **2026-06-03 — 유효 관측 0 특징 처리 확정(버그 수정).** 모든 관측이 NaN/Inf로
+  스킵된 특징은 epsilon floor가 PSI≈8을 만들어 max_psi를 오염시켰다. 이제 유효
+  카운트 합이 0이면 PSI=0으로 보고(§2.4). 분모는 특징별 유효 카운트로 명시.
+- **2026-06-03 — Phase 2: 윈도우 모델 = 텀블링(§2.5) 확정.** 슬라이딩은 비목적.
+- **2026-06-03 — 헤더 하위호환 추가: `driftmon_classify` + `driftmon_severity_t`.**
+  기존 시그니처 불변, 새 무상태 함수만 추가. 임계값(0.1/0.2) 단일 출처를 라이브러리에
+  둠. C ABI 호환 유지(enum은 int).
 
 ---
 
