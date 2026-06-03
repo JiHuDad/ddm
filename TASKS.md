@@ -34,10 +34,12 @@
 - [x] **버그 수정:** 유효 관측 0 특징이 epsilon floor로 허위 고PSI(≈8) 내던 문제 →
       PSI=0 보고 (SPEC §2.4, 회귀 테스트 추가).
 
-## Phase 3 — export 어댑터 (코어와 분리, 선택)
-- [ ] **구현:** prometheus-cpp gauge로 PSI 노출. `DRIFTMON_ENABLE_PROMETHEUS` 빌드
-      옵션, 기본 OFF. 코어는 비의존.
-- [ ] **테스트:** 옵션 OFF에서 코어 빌드 무영향 확인.
+## Phase 3 — export 어댑터 (코어와 분리, 선택) ✓
+- [x] **구현:** PSI를 Prometheus 텍스트 노출 포맷으로 렌더링 (`export/`). 의존성 없음,
+      `DRIFTMON_ENABLE_PROMETHEUS` 빌드 옵션(기본 OFF), 코어는 비의존(export→core 단방향).
+      severity gauge는 `driftmon_classify` 재사용. 라벨 이스케이프·설정 가능한 메트릭명.
+- [x] **테스트:** OFF 빌드에서 코어 무영향(export 타깃 미생성, 22 테스트 그대로),
+      ON 빌드에서 export 모듈 빌드+테스트 5개 통과. 포맷/severity/이스케이프/길이불일치 검증.
 
 ## Phase 4 — reference 생성 도구 (오프라인)
 - [ ] **구현:** 학습 데이터에서 버킷 경계+비율 산출 → `reference.json` 생성 (Python
