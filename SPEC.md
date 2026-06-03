@@ -188,6 +188,9 @@ ctest --test-dir build --output-on-failure       # 미니 러너 테스트 green
 - **2026-06-03 — 헤더 하위호환 추가: `driftmon_classify` + `driftmon_severity_t`.**
   기존 시그니처 불변, 새 무상태 함수만 추가. 임계값(0.1/0.2) 단일 출처를 라이브러리에
   둠. C ABI 호환 유지(enum은 int).
+- **2026-06-03 — Phase 4: reference 생성 도구 — 등빈도 quantile 방식으로 확정.**
+  학습 데이터 크기에 무관하게 각 버킷이 비슷한 샘플 수를 가지므로 PSI 수치 안정성이
+  좋음. stdlib-only Python(numpy 불필요). `DRIFTMON_ENABLE_TOOLS` CMake 옵션 추가.
 - **2026-06-03 — Phase 3: export 어댑터를 의존성 없는 Prometheus 텍스트 포맷으로 구현.**
   원안의 "prometheus-cpp gauge"를 텍스트 노출 포맷 렌더러로 구체화 — 외부 의존성 없이
   실제 Prometheus 스크레이프 포맷을 생성하고 "기존 관측 인프라 재사용" 원칙에 더 부합.
@@ -208,7 +211,8 @@ ctest --test-dir build --output-on-failure       # 미니 러너 테스트 green
   gauge 포함. `DRIFTMON_ENABLE_PROMETHEUS` 빌드 옵션(**기본 OFF**) — OFF면 코어 빌드
   무영향. 의존 방향은 export→core 단방향. 출력 문자열은 기존 HTTP/스크레이프 인프라에
   바로 연결(prometheus-cpp 클라이언트로 보내려면 같은 값을 Gauge API에 전달, README 참조).
-- **Phase 4:** reference 생성 도구(오프라인) — 학습 데이터에서 버킷 경계+비율을 뽑아
-  `reference.json` 생성. 준비 단계라 Python 허용, 불가하면 C++ 소도구.
+- **Phase 4 (완료):** `tools/make_reference.py` — stdlib-only, CSV→reference.json.
+  등빈도(quantile) 버킷 경계 산출, NaN/Inf 필터링, 단조성 보정, `--self-test` 내장.
+  `tools/check_reference.cpp`로 C++ 왕복 통합 테스트.
 - **Phase 5:** 통합 예제 — ONNX RT C++ 추론 래퍼에 glue 5줄. DeepMIMO 요약 특징
   (RSRP·주경로 지연·최강 경로 각도)으로 Zone A→E drift 재현 데모.

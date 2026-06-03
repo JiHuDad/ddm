@@ -41,10 +41,13 @@
 - [x] **테스트:** OFF 빌드에서 코어 무영향(export 타깃 미생성, 22 테스트 그대로),
       ON 빌드에서 export 모듈 빌드+테스트 5개 통과. 포맷/severity/이스케이프/길이불일치 검증.
 
-## Phase 4 — reference 생성 도구 (오프라인)
-- [ ] **구현:** 학습 데이터에서 버킷 경계+비율 산출 → `reference.json` 생성 (Python
-      또는 C++ 소도구).
-- [ ] **테스트:** 생성된 JSON을 `json_min`이 왕복 로드.
+## Phase 4 — reference 생성 도구 (오프라인) ✓
+- [x] **구현:** `tools/make_reference.py` — stdlib-only Python 도구. CSV 입력으로 특징별
+      등빈도(equal-frequency) 버킷 경계+비율 산출 → `reference.json` 생성 (SPEC §3).
+      `--self-test` 모드, NaN/Inf 필터링, 단조성 보정, CLI 인터페이스.
+- [x] **테스트:** Python 단위 13개(`tests/test_make_reference.py`) + CMake 통합:
+      `ref_generate`(Python→JSON) → `ref_load_cpp`(`check_reference` C++ 왕복,
+      DRIFTMON_ENABLE_TOOLS=ON). 전 옵션 조합 5/5 통과.
 
 ## Phase 5 — 통합 예제
 - [ ] **구현:** ONNX RT C++ 추론 래퍼 + glue 5줄 샘플. 여기서만 추론엔진과 만남.
