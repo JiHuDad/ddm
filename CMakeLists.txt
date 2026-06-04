@@ -83,3 +83,27 @@ if(DRIFTMON_ENABLE_TOOLS)
     message(WARNING "python3 not found — tools integration tests skipped")
   endif()
 endif()
+
+# --- Phase 5: integration examples -----------------------------------------
+# Default OFF. Requires python3 (for the DeepMIMO end-to-end demo).
+# When ON, builds demo_driver and adds a ctest that runs run_demo.py.
+option(DRIFTMON_ENABLE_EXAMPLES "Build integration examples (DeepMIMO demo)" OFF)
+
+if(DRIFTMON_ENABLE_EXAMPLES)
+  # C++ command-line drift detection driver for the DeepMIMO demo.
+  add_executable(demo_driver examples/deepmimo_demo/demo_driver.cpp)
+  target_link_libraries(demo_driver PRIVATE driftmon)
+
+  find_program(PYTHON3_EX python3)
+  if(PYTHON3_EX)
+    # End-to-end test: gen_zones → reference.json → Zone A (STABLE) + Zone E (SIGNIFICANT).
+    add_test(NAME deepmimo_e2e
+      COMMAND ${PYTHON3_EX}
+              ${CMAKE_SOURCE_DIR}/examples/deepmimo_demo/run_demo.py
+              --build-dir ${CMAKE_BINARY_DIR}
+    )
+    set_tests_properties(deepmimo_e2e PROPERTIES TIMEOUT 60)
+  else()
+    message(WARNING "python3 not found — deepmimo_e2e test skipped")
+  endif()
+endif()
