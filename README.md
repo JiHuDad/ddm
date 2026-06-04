@@ -218,10 +218,18 @@ To use prometheus-cpp (registry / HTTP exposer / pushgateway), pass the same
 `examples/onnx_integration/onnx_glue.cpp` shows the integration pattern.
 The library never depends on ONNX Runtime; only the application glue does.
 
+`onnx_glue.cpp` defines `run_with_ort()` but no `main` — it is meant to be
+**compiled into your application**, not linked as a standalone binary:
+
 ```sh
-g++ -std=c++17 -DONNXRUNTIME_AVAILABLE \
+# Compile the glue as an object file to link into your own app:
+g++ -std=c++17 -c -DONNXRUNTIME_AVAILABLE \
     -I/opt/onnxruntime/include -I./include \
     examples/onnx_integration/onnx_glue.cpp \
+    -o onnx_glue.o
+
+# Link with your app (which provides main):
+g++ -std=c++17 your_app.cpp onnx_glue.o \
     -L/opt/onnxruntime/lib -lonnxruntime \
     -L./build -ldriftmon -o my_monitor
 ```

@@ -72,11 +72,14 @@ PSI는 `ln(a/e)`와 나눗셈을 포함하므로 0을 다뤄야 한다.
   NaN/Inf) 드리프트는 **정의되지 않으므로 PSI=0**으로 보고한다. (epsilon floor가
   허위 고PSI를 만들지 않도록.) `a_i` 분모는 **특징별** 유효 카운트 합이다.
 
-### 2.5 윈도우 모델 (Windowing) — 텀블링(tumbling)
-- 코어는 **텀블링 윈도우**다. `driftmon_observe`가 관측을 누적하고,
+### 2.5 윈도우 모델 (Windowing)
+- 현재 코어는 **텀블링 윈도우**다. `driftmon_observe`가 관측을 누적하고,
   `driftmon_ready`는 누적 관측 수 ≥ `window_size`일 때 nonzero.
 - 윈도우를 닫는 책임은 호출자에 있다: `ready`면 `compute` 후 `reset`을 호출해
-  다음 윈도우를 새로 시작한다. (슬라이딩 윈도우는 비목적 — 필요 시 별도 결정.)
+  다음 윈도우를 새로 시작한다.
+- **슬라이딩 윈도우**는 Phase 6에서 `driftmon_create_ex(path, DRIFTMON_SLIDING)`으로
+  추가 예정 (§7 결정 로그, §8 로드맵). 슬라이딩 모드에서는 `driftmon_ready`가 최초
+  `window_size`개 누적 후 항상 nonzero를 반환하며, `driftmon_reset`은 no-op이다.
 
 ---
 
