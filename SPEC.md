@@ -196,23 +196,71 @@ ctest --test-dir build --output-on-failure       # 미니 러너 테스트 green
   실제 Prometheus 스크레이프 포맷을 생성하고 "기존 관측 인프라 재사용" 원칙에 더 부합.
   prometheus-cpp 클라이언트(레지스트리/HTTP exposer)는 같은 값을 Gauge API에 넘기는
   선택적 얇은 층으로 남김. 코어는 비의존, 옵션 OFF면 코어 빌드 무영향.
+- **2026-06-04 — Phase 6: 슬라이딩 윈도우 API 설계 확정.** 헤더 하위호환 추가:
+  `driftmon_window_mode_t` enum + `driftmon_create_ex(path, mode)` 신규. `driftmon_create`는
+  `DRIFTMON_TUMBLING` 모드의 편의 래퍼로 유지(기존 호출 코드 무변경).
+  `DRIFTMON_SLIDING` 모드: 길이 `window_size`의 circular buffer에 버킷 인덱스를 저장하고,
+  `window_size` 이상 누적되면 `driftmon_ready`가 항상 nonzero를 반환.
+  `driftmon_reset`은 슬라이딩 모드에서 no-op(rolling buffer 유지).
+
+  ```c
+  typedef enum {
+      DRIFTMON_TUMBLING = 0,   /* 기본: window_size 채운 뒤 reset 호출까지 대기 */
+      DRIFTMON_SLIDING  = 1,   /* rolling: 항상 마지막 window_size 관측을 반영 */
+  } driftmon_window_mode_t;
+
+  driftmon_t* driftmon_create_ex(const char* reference_json_path,
+                                  driftmon_window_mode_t mode);
+  /* driftmon_create(path) == driftmon_create_ex(path, DRIFTMON_TUMBLING) */
+  ```
+
+- **2026-06-04 — Phase 6: 알림 콜백 API 설계 확정.** 헤더 추가:
+  `driftmon_callback_t` 함수 포인터 타입 + `driftmon_set_callback`. `driftmon_compute`가
+  `psi_out`을 확정한 직후 콜백 호출. `fn=NULL`이면 해제. STABLE일 때도 호출되며
+  severity 필터링은 caller 책임(정책·라이브러리 분리).
+
+  ```c
+  typedef void (*driftmon_callback_t)(driftmon_t*          m,
+                                      double               max_psi,
+                                      driftmon_severity_t  severity,
+                                      void*                user_data);
+  void driftmon_set_callback(driftmon_t*          m,
+                             driftmon_callback_t  fn,
+                             void*                user_data);
+  ```
+
+- **2026-06-04 — Phase 6: 다중 레퍼런스 프로파일 API 설계 확정.** 헤더 추가:
+  `driftmon_create_multi(paths, n)`. n개 레퍼런스를 로드하며 모두 동일
+  feature_names·num_buckets·window_size이어야 함(불일치 시 NULL). `driftmon_compute`는
+  `psi_out[j]` = feature j에 대한 n개 레퍼런스 중 max PSI. `n=1`이면 `driftmon_create`와
+  동일. `driftmon_create(path) == driftmon_create_multi(&path, 1)`.
+
+  ```c
+  driftmon_t* driftmon_create_multi(const char** paths, int n);
+  ```
 
 ---
 
-## 8. 로드맵 (Roadmap) — 이번엔 Phase 0만 구현
+## 8. 로드맵 (Roadmap)
 
-- **Phase 0 (현재):** 계약(`driftmon.h`)·SPEC·`CLAUDE.md`/`AGENTS.md`·`TASKS.md`·
+- **Phase 0 (완료):** 계약(`driftmon.h`)·SPEC·`CLAUDE.md`/`AGENTS.md`·`TASKS.md`·
   CMake 골격·무의존 테스트 러너. 컴파일·ctest green인 스텁.
-- **Phase 1:** 코어 — 히스토그램 누적, `reference.json` 로더(최소 파서), PSI 계산.
+- **Phase 1 (완료):** 코어 — 히스토그램 누적, `reference.json` 로더(최소 파서), PSI 계산.
   표준 라이브러리만. 단위 테스트 동봉.
-- **Phase 2:** 윈도우/집계 — 슬라이딩/텀블링 윈도우, 특징별 PSI→max PSI, 임계값 플래그.
+- **Phase 2 (완료):** 윈도우/집계 — 텀블링 윈도우, 특징별 PSI→max PSI, 임계값 플래그
+  (`driftmon_classify` + `driftmon_severity_t`).
 - **Phase 3 (완료):** export 어댑터 — PSI를 **Prometheus 텍스트 노출 포맷**으로 렌더링
   (`export/`). 의존성 없음(표준 라이브러리만), `driftmon_classify` 재사용으로 severity
   gauge 포함. `DRIFTMON_ENABLE_PROMETHEUS` 빌드 옵션(**기본 OFF**) — OFF면 코어 빌드
-  무영향. 의존 방향은 export→core 단방향. 출력 문자열은 기존 HTTP/스크레이프 인프라에
-  바로 연결(prometheus-cpp 클라이언트로 보내려면 같은 값을 Gauge API에 전달, README 참조).
+  무영향. 의존 방향은 export→core 단방향.
 - **Phase 4 (완료):** `tools/make_reference.py` — stdlib-only, CSV→reference.json.
   등빈도(quantile) 버킷 경계 산출, NaN/Inf 필터링, 단조성 보정, `--self-test` 내장.
-  `tools/check_reference.cpp`로 C++ 왕복 통합 테스트.
-- **Phase 5:** 통합 예제 — ONNX RT C++ 추론 래퍼에 glue 5줄. DeepMIMO 요약 특징
-  (RSRP·주경로 지연·최강 경로 각도)으로 Zone A→E drift 재현 데모.
+  `tools/check_reference.cpp`로 C++ 왕복 통합 테스트. `DRIFTMON_ENABLE_TOOLS` 옵션.
+- **Phase 5 (완료):** 통합 예제 — ONNX RT C++ 추론 래퍼에 glue 5줄
+  (`examples/onnx_integration/onnx_glue.cpp`). DeepMIMO 요약 특징(RSRP·주경로 지연·
+  최강 경로 각도)으로 Zone A→E drift 재현 데모(`examples/deepmimo_demo/`).
+  `DRIFTMON_ENABLE_EXAMPLES` 옵션 + `deepmimo_e2e` ctest.
+- **Phase 6 (계획):** 고급 모니터링 기능 세 가지 — 헤더 하위호환 추가(§7 결정 로그):
+  - **슬라이딩 윈도우**: `driftmon_create_ex` + `driftmon_window_mode_t`. rolling buffer.
+  - **알림 콜백**: `driftmon_set_callback`. compute 직후 severity 통보.
+  - **다중 레퍼런스 프로파일**: `driftmon_create_multi`. n개 레퍼런스 중 max PSI.
