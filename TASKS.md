@@ -55,3 +55,24 @@
 - [x] **데모:** DeepMIMO 요약 특징(RSRP·주경로 지연·최강 경로 각도)으로 Zone A→E
       drift 재현. `demo_driver.cpp` + `run_demo.py` + `gen_zones.py`. ctest `deepmimo_e2e` green.
       `DRIFTMON_ENABLE_EXAMPLES=ON` 빌드 옵션 추가.
+
+## Phase 6 — 고급 모니터링 기능 (계획)
+
+> API 설계는 SPEC.md §7 결정 로그(2026-06-04 항목 3건)에 확정됨. 헤더 변경은 모두
+> 하위호환 추가(기존 시그니처 불변). 한 툴이 구현 → 다른 툴이 테스트·엣지케이스.
+
+- [ ] **구현:** 슬라이딩 윈도우 — `driftmon_window_mode_t` enum +
+      `driftmon_create_ex(path, mode)` 추가. `DRIFTMON_SLIDING` 모드: 길이 `window_size`의
+      circular buffer에 버킷 인덱스 저장. `driftmon_create(path)` 하위호환 유지.
+- [ ] **테스트:** 슬라이딩 윈도우 — `window_size` 이상 누적 후 `driftmon_ready` nonzero;
+      `driftmon_reset` no-op; 연속 `driftmon_compute`가 rolling 분포를 반영하는지 검증.
+      TUMBLING 모드 기존 동작 회귀 없음.
+- [ ] **구현:** 알림 콜백 — `driftmon_callback_t` 타입 + `driftmon_set_callback(m, fn, user_data)`.
+      `driftmon_compute`가 `psi_out` 확정 직후 콜백 호출. `fn=NULL`이면 해제.
+- [ ] **테스트:** 콜백 호출 타이밍(compute 직후), NULL 해제 안전성, STABLE/WARNING/SIGNIFICANT
+      각각에서 호출 확인, 콜백 미등록 시 crash 없음.
+- [ ] **구현:** 다중 레퍼런스 프로파일 — `driftmon_create_multi(paths, n)`. n개 레퍼런스
+      로드; `driftmon_compute`의 `psi_out[j]` = feature j의 n개 레퍼런스 max PSI;
+      스키마 불일치(feature 수·버킷 수·window_size 다름) 시 NULL 반환.
+- [ ] **테스트:** `n=1` 단일(기존 `driftmon_create`와 동일 결과), `n=2` max 선택 검증,
+      스키마 불일치(feature 수 다름·window_size 다름) 거부, NULL 경로 안전성.
