@@ -61,10 +61,10 @@
 > API 설계는 SPEC.md §7 결정 로그(2026-06-04 항목 3건)에 확정됨. 헤더 변경은 모두
 > 하위호환 추가(기존 시그니처 불변). 한 툴이 구현 → 다른 툴이 테스트·엣지케이스.
 
-- [ ] **구현:** 슬라이딩 윈도우 — `driftmon_window_mode_t` enum +
+- [x] **구현:** 슬라이딩 윈도우 — `driftmon_window_mode_t` enum +
       `driftmon_create_ex(path, mode)` 추가. `DRIFTMON_SLIDING` 모드: 길이 `window_size`의
       circular buffer에 버킷 인덱스 저장. `driftmon_create(path)` 하위호환 유지.
-- [ ] **테스트:** 슬라이딩 윈도우 — `window_size` 이상 누적 후 `driftmon_ready` nonzero;
+- [x] **테스트:** 슬라이딩 윈도우 — `window_size` 이상 누적 후 `driftmon_ready` nonzero;
       `driftmon_reset` no-op; 연속 `driftmon_compute`가 rolling 분포를 반영하는지 검증.
       TUMBLING 모드 기존 동작 회귀 없음.
 - [ ] **구현:** 알림 콜백 — `driftmon_callback_t` 타입 + `driftmon_set_callback(m, fn, user_data)`.

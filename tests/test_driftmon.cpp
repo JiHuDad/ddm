@@ -326,4 +326,107 @@ TEST(consecutive_tumbling_windows) {
     driftmon_destroy(m);
 }
 
+// ─── Phase 6: sliding window ─────────────────────────────────────────────────
+
+// driftmon_create_ex with an invalid mode value must return NULL.
+TEST(create_ex_invalid_mode_returns_null) {
+    std::string path = write_tmp("ex_invalid_mode", VALID_1F);
+    // Cast an out-of-range int to the enum — must be rejected.
+    driftmon_t* m = driftmon_create_ex(path.c_str(),
+                                       static_cast<driftmon_window_mode_t>(99));
+    CHECK(m == nullptr);
+}
+
+// driftmon_create_ex with TUMBLING behaves identically to driftmon_create.
+TEST(create_ex_tumbling_same_as_create) {
+    std::string path = write_tmp("ex_tumbling", VALID_1F);
+    driftmon_t* m = driftmon_create_ex(path.c_str(), DRIFTMON_TUMBLING);
+    CHECK(m != nullptr);
+    CHECK(driftmon_num_features(m) == 1);
+
+    double v = 0.5;
+    for (int i = 0; i < 9; ++i) driftmon_observe(m, &v, 1);
+    CHECK(driftmon_ready(m) == 0);          // not yet full
+    driftmon_observe(m, &v, 1);
+    CHECK(driftmon_ready(m) != 0);          // full at window_size=10
+    driftmon_reset(m);
+    CHECK(driftmon_ready(m) == 0);          // reset clears tumbling window
+    driftmon_destroy(m);
+}
+
+// Sliding window: not ready before window_size observations.
+TEST(sliding_not_ready_before_window_size) {
+    std::string path = write_tmp("sl_not_ready", VALID_1F);  // window_size=10
+    driftmon_t* m = driftmon_create_ex(path.c_str(), DRIFTMON_SLIDING);
+    CHECK(m != nullptr);
+
+    double v = 0.5;
+    for (int i = 0; i < 9; ++i) driftmon_observe(m, &v, 1);
+    CHECK(driftmon_ready(m) == 0);
+    driftmon_destroy(m);
+}
+
+// Sliding window: ready at exactly window_size and stays ready thereafter.
+TEST(sliding_ready_at_window_size_and_stays) {
+    std::string path = write_tmp("sl_ready", VALID_1F);
+    driftmon_t* m = driftmon_create_ex(path.c_str(), DRIFTMON_SLIDING);
+    CHECK(m != nullptr);
+
+    double v = 0.5;
+    for (int i = 0; i < 10; ++i) driftmon_observe(m, &v, 1);
+    CHECK(driftmon_ready(m) != 0);          // ready at window_size
+
+    // Additional observations: still ready (sliding never un-readies).
+    for (int i = 0; i < 5; ++i) driftmon_observe(m, &v, 1);
+    CHECK(driftmon_ready(m) != 0);
+    driftmon_destroy(m);
+}
+
+// Sliding window: reset is a no-op — ready and counts are preserved.
+TEST(sliding_reset_is_noop) {
+    std::string path = write_tmp("sl_reset", VALID_1F);
+    driftmon_t* m = driftmon_create_ex(path.c_str(), DRIFTMON_SLIDING);
+    CHECK(m != nullptr);
+
+    double v = 0.5;
+    for (int i = 0; i < 10; ++i) driftmon_observe(m, &v, 1);
+    CHECK(driftmon_ready(m) != 0);
+
+    driftmon_reset(m);                      // must be a no-op
+    CHECK(driftmon_ready(m) != 0);          // still ready
+    double max_psi;
+    driftmon_compute(m, nullptr, &max_psi);
+    CHECK(max_psi >= 0.0);                  // compute still works
+    driftmon_destroy(m);
+}
+
+// Sliding window reflects only the most recent window_size observations.
+// Step 1: fill window with reference distribution → PSI~0 (stable).
+// Step 2: add window_size drifted observations → oldest are evicted, PSI high.
+TEST(sliding_reflects_recent_observations) {
+    // VALID_1F: window_size=10, ref_ratios=[0.5, 0.3, 0.2], edges=[0,1,2,3]
+    std::string path = write_tmp("sl_recent", VALID_1F);
+    driftmon_t* m = driftmon_create_ex(path.c_str(), DRIFTMON_SLIDING);
+    CHECK(m != nullptr);
+
+    // Step 1: 10 obs matching reference → stable.
+    double v;
+    for (int i = 0; i < 5; ++i) { v = 0.5; driftmon_observe(m, &v, 1); }  // bucket 0
+    for (int i = 0; i < 3; ++i) { v = 1.5; driftmon_observe(m, &v, 1); }  // bucket 1
+    for (int i = 0; i < 2; ++i) { v = 2.5; driftmon_observe(m, &v, 1); }  // bucket 2
+
+    CHECK(driftmon_ready(m) != 0);
+    double max1;
+    driftmon_compute(m, nullptr, &max1);
+    CHECK_NEAR(max1, 0.0, 1e-9);           // reference distribution → PSI~0
+
+    // Step 2: 10 more obs all in bucket 0 → evicts all reference-matching obs.
+    for (int i = 0; i < 10; ++i) { v = 0.5; driftmon_observe(m, &v, 1); }
+
+    double max2;
+    driftmon_compute(m, nullptr, &max2);
+    CHECK(max2 > 0.2);                      // only drifted obs in window → significant
+    driftmon_destroy(m);
+}
+
 int main() { return RUN_ALL(); }
