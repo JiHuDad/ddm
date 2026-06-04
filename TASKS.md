@@ -49,7 +49,9 @@
       `ref_generate`(Python→JSON) → `ref_load_cpp`(`check_reference` C++ 왕복,
       DRIFTMON_ENABLE_TOOLS=ON). 전 옵션 조합 5/5 통과.
 
-## Phase 5 — 통합 예제
-- [ ] **구현:** ONNX RT C++ 추론 래퍼 + glue 5줄 샘플. 여기서만 추론엔진과 만남.
-- [ ] **데모:** DeepMIMO 요약 특징(RSRP·주경로 지연·최강 경로 각도)으로 Zone A→E
-      drift 재현.
+## Phase 5 — 통합 예제 ✓
+- [x] **구현:** ONNX RT C++ 추론 래퍼 + glue 5줄 샘플 (`examples/onnx_integration/onnx_glue.cpp`).
+      여기서만 추론엔진과 만남. `#ifdef ONNXRUNTIME_AVAILABLE` 가드로 의존성 선택적.
+- [x] **데모:** DeepMIMO 요약 특징(RSRP·주경로 지연·최강 경로 각도)으로 Zone A→E
+      drift 재현. `demo_driver.cpp` + `run_demo.py` + `gen_zones.py`. ctest `deepmimo_e2e` green.
+      `DRIFTMON_ENABLE_EXAMPLES=ON` 빌드 옵션 추가.
