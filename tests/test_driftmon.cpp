@@ -328,6 +328,15 @@ TEST(consecutive_tumbling_windows) {
 
 // ─── Phase 6: sliding window ─────────────────────────────────────────────────
 
+// driftmon_create_ex with an invalid mode value must return NULL.
+TEST(create_ex_invalid_mode_returns_null) {
+    std::string path = write_tmp("ex_invalid_mode", VALID_1F);
+    // Cast an out-of-range int to the enum — must be rejected.
+    driftmon_t* m = driftmon_create_ex(path.c_str(),
+                                       static_cast<driftmon_window_mode_t>(99));
+    CHECK(m == nullptr);
+}
+
 // driftmon_create_ex with TUMBLING behaves identically to driftmon_create.
 TEST(create_ex_tumbling_same_as_create) {
     std::string path = write_tmp("ex_tumbling", VALID_1F);

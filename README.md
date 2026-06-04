@@ -153,8 +153,16 @@ C ABI contract: [`include/driftmon.h`](include/driftmon.h) (frozen — see SPEC.
 
 ```c
 // Lifecycle
-driftmon_t* driftmon_create(const char* reference_json_path);  // NULL on failure
+driftmon_t* driftmon_create(const char* reference_json_path);  // NULL on failure; TUMBLING mode
 void        driftmon_destroy(driftmon_t* m);
+
+// Window mode (Phase 6)
+typedef enum {
+    DRIFTMON_TUMBLING = 0,  // accumulate until window_size, then reset
+    DRIFTMON_SLIDING  = 1,  // always reflect last window_size observations
+} driftmon_window_mode_t;
+driftmon_t* driftmon_create_ex(const char* reference_json_path,
+                                driftmon_window_mode_t mode);  // NULL on failure or invalid mode
 
 // Observation
 int  driftmon_num_features(const driftmon_t* m);               // allocate psi_out safely
@@ -162,9 +170,11 @@ void driftmon_observe(driftmon_t* m, const double* feats, int n);
 
 // Window
 int  driftmon_ready(const driftmon_t* m);   // nonzero when window is full
+                                             // sliding: stays nonzero once set
 
-// Compute (call after ready, then reset)
+// Compute
 void driftmon_compute(driftmon_t* m, double* psi_out, double* max_psi);
+// Reset: tumbling — clears window; sliding — no-op
 void driftmon_reset(driftmon_t* m);
 
 // Classification (stateless, reusable anywhere)

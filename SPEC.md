@@ -127,25 +127,34 @@ typedef enum {
     DRIFTMON_SIGNIFICANT = 2   /* PSI >= 0.2 */
 } driftmon_severity_t;
 
-driftmon_t* driftmon_create(const char* reference_json_path); // 실패 시 NULL
+/* 윈도우 누적 모델 — §2.5 */
+typedef enum {
+    DRIFTMON_TUMBLING = 0, /* 기본: window_size 누적 후 reset 호출까지 유지 */
+    DRIFTMON_SLIDING  = 1  /* rolling: 항상 마지막 window_size 관측을 반영  */
+} driftmon_window_mode_t;
+
+driftmon_t* driftmon_create(const char* reference_json_path);  // 실패 시 NULL; TUMBLING 모드
+driftmon_t* driftmon_create_ex(const char* reference_json_path,
+                                driftmon_window_mode_t mode);  // 실패·비유효 mode 시 NULL
 int  driftmon_num_features(const driftmon_t* m);              // psi_out 길이 산정용
 void driftmon_observe (driftmon_t* m, const double* feats, int n); // 관측 1건 누적
 int  driftmon_ready   (const driftmon_t* m);                 // 윈도우 찼으면 nonzero
 void driftmon_compute (driftmon_t* m, double* psi_out, double* max_psi);
 driftmon_severity_t driftmon_classify(double psi);           // 임계값 분류(무상태)
-void driftmon_reset   (driftmon_t* m);                       // 현재 윈도우만 비움
+void driftmon_reset   (driftmon_t* m);                       // 텀블링: 윈도우 초기화; 슬라이딩: no-op
 void driftmon_destroy (driftmon_t* m);                       // NULL 안전
 ```
 
 **의미 (semantics):**
-- `driftmon_create`: 파일 없음/파싱 실패/스키마 불일치 시 `NULL`.
+- `driftmon_create`: 파일 없음/파싱 실패/스키마 불일치 시 `NULL`. `driftmon_create_ex(path, DRIFTMON_TUMBLING)`과 동일.
+- `driftmon_create_ex`: `mode`가 유효하지 않은 값(0/1 이외)이면 `NULL` 반환.
 - `driftmon_num_features`: 참조의 특징 수. caller가 `psi_out`을 안전히 할당하는 데 사용.
 - `driftmon_observe`: `feats`는 `n`개의 double. `n`은 `driftmon_num_features(m)`와 일치해야 함.
-- `driftmon_ready`: 누적 관측 수가 `window_size` 이상이면 nonzero.
+- `driftmon_ready`: 누적 관측 수가 `window_size` 이상이면 nonzero. 슬라이딩 모드에서는 한 번 nonzero가 되면 계속 유지됨.
 - `driftmon_compute`: `psi_out`(길이 ≥ num_features)에 특징별 PSI, `max_psi`에 최댓값.
   두 out 인자 모두 NULL 가능(건너뜀). 유효 관측 0인 특징은 PSI=0 (§2.4).
 - `driftmon_classify`: PSI 값을 §2.3 임계값으로 분류. 무상태 순수 함수(핸들 불필요).
-- `driftmon_reset`: 참조는 그대로 두고 현재 윈도우 누적만 초기화 (텀블링, §2.5).
+- `driftmon_reset`: **텀블링** — 참조는 그대로 두고 현재 윈도우 누적만 초기화. **슬라이딩** — no-op, rolling buffer 유지 (§2.5).
 - `driftmon_destroy`: 모든 자원 해제. NULL 호출 안전.
 
 ---

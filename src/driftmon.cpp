@@ -40,6 +40,7 @@ extern "C" {
 driftmon_t* driftmon_create_ex(const char* reference_json_path,
                                 driftmon_window_mode_t mode) {
     if (reference_json_path == nullptr) return nullptr;
+    if (mode != DRIFTMON_TUMBLING && mode != DRIFTMON_SLIDING) return nullptr;
     dm::ReferenceProfile ref;
     if (!dm::load_reference(reference_json_path, ref)) return nullptr;
     driftmon_t* m = new (std::nothrow) driftmon_t();
