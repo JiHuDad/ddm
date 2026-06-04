@@ -33,6 +33,10 @@ struct driftmon {
     // Size: window_size × num_features; allocated only for DRIFTMON_SLIDING.
     std::vector<std::vector<int>> sliding_buf;  // [slot][feature]
     int sliding_head = 0;  // next write position (wraps modulo window_size)
+
+    // Notification callback (Phase 6b). NULL means no callback registered.
+    driftmon_callback_t callback      = nullptr;
+    void*               callback_data = nullptr;
 };
 
 extern "C" {
@@ -158,6 +162,10 @@ void driftmon_compute(driftmon_t* m, double* psi_out, double* max_psi) {
         if (psi > max_val) max_val = psi;
     }
     if (max_psi != nullptr) *max_psi = max_val;
+
+    // Fire notification callback after all outputs are finalised.
+    if (m->callback != nullptr)
+        m->callback(m, max_val, driftmon_classify(max_val), m->callback_data);
 }
 
 driftmon_severity_t driftmon_classify(double psi) {
@@ -165,6 +173,14 @@ driftmon_severity_t driftmon_classify(double psi) {
     if (psi >= 0.2) return DRIFTMON_SIGNIFICANT;
     if (psi >= 0.1) return DRIFTMON_WARNING;
     return DRIFTMON_STABLE;
+}
+
+void driftmon_set_callback(driftmon_t*         m,
+                           driftmon_callback_t fn,
+                           void*               user_data) {
+    if (m == nullptr) return;
+    m->callback      = fn;
+    m->callback_data = user_data;
 }
 
 void driftmon_reset(driftmon_t* m) {
