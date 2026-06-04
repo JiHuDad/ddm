@@ -28,13 +28,27 @@ typedef enum {
     DRIFTMON_SIGNIFICANT = 2  /* PSI >= 0.2 : significant drift     */
 } driftmon_severity_t;
 
+/* Window accumulation model (Phase 6, §2.5). */
+typedef enum {
+    DRIFTMON_TUMBLING = 0, /* default: accumulate until window_size, then reset  */
+    DRIFTMON_SLIDING  = 1  /* rolling: always reflect last window_size observations */
+} driftmon_window_mode_t;
+
 /*
  * Create a monitor from a reference profile (reference.json).
- * Runtime config (window_size, bucket layout, ref ratios) lives in the JSON,
- * keeping this header minimal and stable.
+ * Equivalent to driftmon_create_ex(path, DRIFTMON_TUMBLING).
  * Returns NULL on failure (file missing, parse error, schema mismatch).
  */
 driftmon_t* driftmon_create(const char* reference_json_path);
+
+/*
+ * Create a monitor with an explicit window mode.
+ * Runtime config (window_size, bucket layout, ref ratios) lives in the JSON,
+ * keeping this header minimal and stable.
+ * Returns NULL on failure.
+ */
+driftmon_t* driftmon_create_ex(const char* reference_json_path,
+                                driftmon_window_mode_t mode);
 
 /*
  * Number of features the monitor expects. Callers use this to size the
@@ -48,7 +62,9 @@ int driftmon_num_features(const driftmon_t* m);
  */
 void driftmon_observe(driftmon_t* m, const double* feats, int n);
 
-/* Nonzero once the current window has accumulated enough observations. */
+/* Nonzero once the current window has accumulated enough observations.
+ * Tumbling: resets to 0 after driftmon_reset().
+ * Sliding:  stays nonzero once first full window has been seen. */
 int driftmon_ready(const driftmon_t* m);
 
 /*
@@ -66,7 +82,8 @@ void driftmon_compute(driftmon_t* m, double* psi_out, double* max_psi);
  */
 driftmon_severity_t driftmon_classify(double psi);
 
-/* Clear the current window's accumulated observations (reference untouched). */
+/* Tumbling mode: clear the current window's observations (reference untouched).
+ * Sliding mode: no-op — the rolling buffer continues uninterrupted. */
 void driftmon_reset(driftmon_t* m);
 
 /* Free all resources. Safe to call with NULL. */
