@@ -163,7 +163,15 @@ void driftmon_destroy (driftmon_t* m);                       // NULL 안전
 - `driftmon_compute`: `psi_out`(길이 ≥ num_features)에 특징별 PSI, `max_psi`에 최댓값.
   두 out 인자 모두 NULL 가능(건너뜀). 유효 관측 0인 특징은 PSI=0 (§2.4).
 - `driftmon_classify`: PSI 값을 §2.3 임계값으로 분류. 무상태 순수 함수(핸들 불필요).
-- `driftmon_create_multi`: `n`개 레퍼런스를 로드. 모두 동일 feature_names·num_buckets·window_size이어야 함(불일치·로드 실패 시 NULL). `n=1`은 `driftmon_create`와 동일. 관측 binning은 `references[0]`의 edges 기준. `driftmon_compute`의 `psi_out[j]` = feature j에 대해 n개 레퍼런스 중 max PSI.
+- `driftmon_create_multi`: `n`개 레퍼런스를 로드. 모두 동일 feature_names·num_buckets·
+  **edges**·window_size이어야 함(불일치·로드 실패 시 NULL). edges를 포함한 구조적 동일성이
+  필요한 이유: `driftmon_observe`는 `references[0].edges`를 기준으로 관측값을 버킷에 배치한다.
+  다른 edges를 가진 레퍼런스가 있으면 그 레퍼런스의 `ref_ratios`는 다른 bin 경계를 전제로
+  만들어진 것이므로, 실제 counts와 비교하면 허위 drift가 발생한다. **설계 의도:**
+  동일한 훈련 분포(같은 edges)에서 시점별로 생성한 복수의 기준선을 동시에 모니터링하는 용도.
+  각각 독립적인 edges를 가진 레퍼런스를 지원하려면 관측 시점에 레퍼런스별 재binning이 필요하며
+  이는 다른 설계다(현재 버전에서 미지원). `n=1`은 `driftmon_create`와 동일. `driftmon_compute`의
+  `psi_out[j]` = feature j에 대해 n개 레퍼런스 중 max PSI.
 - `driftmon_set_callback`: `fn`이 비-NULL이면 `driftmon_compute`가 `psi_out`/`max_psi`를 확정한 직후 호출. STABLE 포함 모든 severity에서 호출됨(필터링은 caller 책임). `fn=NULL`이면 콜백 해제. `m=NULL`이면 no-op.
 - `driftmon_reset`: **텀블링** — 참조는 그대로 두고 현재 윈도우 누적만 초기화. **슬라이딩** — no-op, rolling buffer 유지 (§2.5).
 - `driftmon_destroy`: 모든 자원 해제. NULL 호출 안전.
@@ -254,9 +262,19 @@ ctest --test-dir build --output-on-failure       # 미니 러너 테스트 green
 
 - **2026-06-04 — Phase 6: 다중 레퍼런스 프로파일 API 설계 확정.** 헤더 추가:
   `driftmon_create_multi(paths, n)`. n개 레퍼런스를 로드하며 모두 동일
-  feature_names·num_buckets·window_size이어야 함(불일치 시 NULL). `driftmon_compute`는
-  `psi_out[j]` = feature j에 대한 n개 레퍼런스 중 max PSI. `n=1`이면 `driftmon_create`와
-  동일. `driftmon_create(path) == driftmon_create_multi(&path, 1)`.
+  feature_names·num_buckets·**edges**·window_size이어야 함(불일치 시 NULL).
+  `driftmon_compute`는 `psi_out[j]` = feature j에 대한 n개 레퍼런스 중 max PSI.
+  `n=1`이면 `driftmon_create`와 동일.
+
+  **edges 동일성 필요 이유:** `driftmon_observe`는 `references[0].edges`만 사용하여
+  관측값을 버킷 인덱스로 변환한다. edges가 다른 레퍼런스의 `ref_ratios`는 다른 bin 경계를
+  전제로 만들어졌으므로, 같은 bucket count를 공유하더라도 비교가 무의미해진다
+  (단순 구조 검사만으로는 이 문제를 잡을 수 없어 edges 비교를 명시적으로 수행한다).
+
+  **지원 범위 결정:** 현재 API는 "동일 훈련 분포(같은 edges)에서 시점별 기준선 스냅샷"
+  용도로 설계됐다. 각각 독립적인 edges를 가진 레퍼런스(예: 서로 다른 데이터셋에서 생성된
+  기준선)를 지원하려면 관측 시점에 레퍼런스별로 별도 binning이 필요하며, 내부 구조를
+  레퍼런스별 per-slot counts로 바꿔야 한다 — 이는 향후 별도 설계 결정으로 남긴다.
 
   ```c
   driftmon_t* driftmon_create_multi(const char** paths, int n);
