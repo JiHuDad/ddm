@@ -111,6 +111,57 @@ TEST(reference_empty_features_rejected) {
     CHECK(driftmon_create(path.c_str()) == nullptr);
 }
 
+TEST(reference_non_monotonic_edges_rejected) {
+    // edges [0, 2, 1, 3] are not strictly increasing — must be rejected.
+    std::string path = write_tmp("nonmono",
+        "{\"version\":1,\"window_size\":10,\"features\":["
+        "{\"name\":\"x\",\"edges\":[0.0,2.0,1.0,3.0],\"ref_ratios\":[0.4,0.3,0.3]}"
+        "]}");
+    CHECK(driftmon_create(path.c_str()) == nullptr);
+}
+
+TEST(reference_equal_edges_rejected) {
+    // edges [0, 1, 1, 2] has a duplicate — not strictly increasing.
+    std::string path = write_tmp("equal_edges",
+        "{\"version\":1,\"window_size\":10,\"features\":["
+        "{\"name\":\"x\",\"edges\":[0.0,1.0,1.0,2.0],\"ref_ratios\":[0.4,0.3,0.3]}"
+        "]}");
+    CHECK(driftmon_create(path.c_str()) == nullptr);
+}
+
+TEST(reference_fractional_window_size_rejected) {
+    // window_size must be an integer; 10.5 is fractional — must reject.
+    std::string path = write_tmp("frac_ws",
+        "{\"version\":1,\"window_size\":10.5,\"features\":["
+        "{\"name\":\"x\",\"edges\":[0.0,1.0,2.0],\"ref_ratios\":[0.5,0.5]}"
+        "]}");
+    CHECK(driftmon_create(path.c_str()) == nullptr);
+}
+
+TEST(reference_trailing_garbage_rejected) {
+    // Valid JSON followed by extra text must be rejected.
+    std::string path = write_tmp("trailing",
+        "{\"version\":1,\"window_size\":10,\"features\":["
+        "{\"name\":\"x\",\"edges\":[0.0,1.0,2.0],\"ref_ratios\":[0.5,0.5]}"
+        "]} EXTRA");
+    CHECK(driftmon_create(path.c_str()) == nullptr);
+}
+
+TEST(reference_unicode_feature_name_roundtrip) {
+    // 신호 == "신호" (U+C2E0 U+D638); parser must decode \uXXXX to UTF-8.
+    std::string path = write_tmp("unicode_name",
+        "{\"version\":1,\"window_size\":10,\"features\":["
+        "{\"name\":\"\\uC2E0\\uD638\",\"edges\":[0.0,1.0,2.0],\"ref_ratios\":[0.5,0.5]}"
+        "]}");
+    driftmon_t* m = driftmon_create(path.c_str());
+    CHECK(m != nullptr);
+    // The decoded name should be UTF-8 bytes for 신호.
+    // We don't expose feature names through the C API, so just verify load succeeds
+    // and the monitor is functional.
+    CHECK(driftmon_num_features(m) == 1);
+    driftmon_destroy(m);
+}
+
 // ─── Phase 1: window readiness ───────────────────────────────────────────────
 
 TEST(window_not_ready_before_enough_observations) {

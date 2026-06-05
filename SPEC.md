@@ -77,8 +77,8 @@ PSI는 `ln(a/e)`와 나눗셈을 포함하므로 0을 다뤄야 한다.
   `driftmon_ready`는 누적 관측 수 ≥ `window_size`일 때 nonzero.
 - 윈도우를 닫는 책임은 호출자에 있다: `ready`면 `compute` 후 `reset`을 호출해
   다음 윈도우를 새로 시작한다.
-- **슬라이딩 윈도우**는 Phase 6에서 `driftmon_create_ex(path, DRIFTMON_SLIDING)`으로
-  추가 예정 (§7 결정 로그, §8 로드맵). 슬라이딩 모드에서는 `driftmon_ready`가 최초
+- **슬라이딩 윈도우**는 `driftmon_create_ex(path, DRIFTMON_SLIDING)`으로 사용한다
+  (Phase 6, §7 결정 로그). 슬라이딩 모드에서는 `driftmon_ready`가 최초
   `window_size`개 누적 후 항상 nonzero를 반환하며, `driftmon_reset`은 no-op이다.
 
 ---
