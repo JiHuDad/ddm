@@ -51,6 +51,16 @@ driftmon_t* driftmon_create_ex(const char* reference_json_path,
                                 driftmon_window_mode_t mode);
 
 /*
+ * Create a monitor that computes PSI against multiple reference profiles.
+ * All references must share the same feature names, bucket counts per feature,
+ * and window_size; returns NULL on any mismatch or load failure.
+ * psi_out[j] from driftmon_compute = max PSI for feature j across all n refs.
+ * n == 1 gives identical behaviour to driftmon_create(paths[0]).
+ * Window mode defaults to DRIFTMON_TUMBLING.
+ */
+driftmon_t* driftmon_create_multi(const char** paths, int n);
+
+/*
  * Number of features the monitor expects. Callers use this to size the
  * `psi_out` buffer for driftmon_compute and to validate their feature count.
  */

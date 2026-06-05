@@ -185,6 +185,10 @@ typedef enum {
 } driftmon_severity_t;
 driftmon_severity_t driftmon_classify(double psi);
 
+// Multi-reference (Phase 6): psi_out[j] = max PSI across n references
+// All refs must share feature names, bucket counts, edges, and window_size.
+driftmon_t* driftmon_create_multi(const char** paths, int n);  // NULL on failure
+
 // Notification callback (Phase 6) — fired by compute after outputs are set
 typedef void (*driftmon_callback_t)(driftmon_t* m, double max_psi,
                                     driftmon_severity_t severity, void* user_data);
@@ -276,4 +280,4 @@ if (driftmon_ready(dm)) {
 | 3 | Prometheus export adapter (optional) | ✓ Complete |
 | 4 | `make_reference.py` reference generation tool | ✓ Complete |
 | 5 | DeepMIMO demo · ONNX RT glue pattern | ✓ Complete |
-| 6 | Sliding window · notification callback · multi-reference | Planned |
+| 6 | Sliding window · notification callback · multi-reference | ✓ Complete |
