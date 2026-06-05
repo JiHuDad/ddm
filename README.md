@@ -184,6 +184,12 @@ typedef enum {
     DRIFTMON_SIGNIFICANT = 2,  // max_psi >= 0.2
 } driftmon_severity_t;
 driftmon_severity_t driftmon_classify(double psi);
+
+// Notification callback (Phase 6) — fired by compute after outputs are set
+typedef void (*driftmon_callback_t)(driftmon_t* m, double max_psi,
+                                    driftmon_severity_t severity, void* user_data);
+void driftmon_set_callback(driftmon_t* m, driftmon_callback_t fn, void* user_data);
+// fn == NULL unregisters; called for all severities (filter in your callback)
 ```
 
 NaN/Inf observations are silently ignored. Features with zero valid observations

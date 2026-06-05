@@ -82,6 +82,20 @@ void driftmon_compute(driftmon_t* m, double* psi_out, double* max_psi);
  */
 driftmon_severity_t driftmon_classify(double psi);
 
+/*
+ * Notification callback — fired by driftmon_compute immediately after psi_out
+ * and max_psi are finalised.  Called for every severity level (STABLE included);
+ * filtering is the caller's responsibility.  fn == NULL unregisters.
+ * Safe to call with m == NULL (no-op).
+ */
+typedef void (*driftmon_callback_t)(driftmon_t*         m,
+                                    double              max_psi,
+                                    driftmon_severity_t severity,
+                                    void*               user_data);
+void driftmon_set_callback(driftmon_t*         m,
+                           driftmon_callback_t fn,
+                           void*               user_data);
+
 /* Tumbling mode: clear the current window's observations (reference untouched).
  * Sliding mode: no-op — the rolling buffer continues uninterrupted. */
 void driftmon_reset(driftmon_t* m);

@@ -67,9 +67,9 @@
 - [x] **테스트:** 슬라이딩 윈도우 — `window_size` 이상 누적 후 `driftmon_ready` nonzero;
       `driftmon_reset` no-op; 연속 `driftmon_compute`가 rolling 분포를 반영하는지 검증.
       TUMBLING 모드 기존 동작 회귀 없음.
-- [ ] **구현:** 알림 콜백 — `driftmon_callback_t` 타입 + `driftmon_set_callback(m, fn, user_data)`.
+- [x] **구현:** 알림 콜백 — `driftmon_callback_t` 타입 + `driftmon_set_callback(m, fn, user_data)`.
       `driftmon_compute`가 `psi_out` 확정 직후 콜백 호출. `fn=NULL`이면 해제.
-- [ ] **테스트:** 콜백 호출 타이밍(compute 직후), NULL 해제 안전성, STABLE/WARNING/SIGNIFICANT
+- [x] **테스트:** 콜백 호출 타이밍(compute 직후), NULL 해제 안전성, STABLE/WARNING/SIGNIFICANT
       각각에서 호출 확인, 콜백 미등록 시 crash 없음.
 - [ ] **구현:** 다중 레퍼런스 프로파일 — `driftmon_create_multi(paths, n)`. n개 레퍼런스
       로드; `driftmon_compute`의 `psi_out[j]` = feature j의 n개 레퍼런스 max PSI;

@@ -429,4 +429,125 @@ TEST(sliding_reflects_recent_observations) {
     driftmon_destroy(m);
 }
 
+// ─── Phase 6: notification callback ─────────────────────────────────────────
+
+struct CallbackCapture {
+    int         call_count = 0;
+    double      last_max_psi = -1.0;
+    driftmon_severity_t last_severity = DRIFTMON_STABLE;
+};
+
+static void capture_cb(driftmon_t* /*m*/, double max_psi,
+                       driftmon_severity_t severity, void* user_data) {
+    auto* cap = static_cast<CallbackCapture*>(user_data);
+    cap->call_count++;
+    cap->last_max_psi  = max_psi;
+    cap->last_severity = severity;
+}
+
+// No callback registered: compute must not crash.
+TEST(callback_not_registered_no_crash) {
+    std::string path = write_tmp("cb_none", VALID_1F);
+    driftmon_t* m = driftmon_create(path.c_str());
+    CHECK(m != nullptr);
+    double v = 0.5;
+    for (int i = 0; i < 10; ++i) driftmon_observe(m, &v, 1);
+    driftmon_compute(m, nullptr, nullptr);  // must not crash
+    driftmon_destroy(m);
+}
+
+// driftmon_set_callback with NULL m must not crash.
+TEST(callback_set_on_null_handle_no_crash) {
+    driftmon_set_callback(nullptr, capture_cb, nullptr);
+    CHECK(true);
+}
+
+// Callback is fired once per driftmon_compute call with correct values.
+TEST(callback_fires_with_correct_severity) {
+    std::string path = write_tmp("cb_fire", VALID_1F);
+    driftmon_t* m = driftmon_create(path.c_str());
+    CHECK(m != nullptr);
+
+    CallbackCapture cap;
+    driftmon_set_callback(m, capture_cb, &cap);
+
+    // Fill with reference distribution → STABLE.
+    double v;
+    for (int i = 0; i < 5; ++i) { v = 0.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 3; ++i) { v = 1.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 2; ++i) { v = 2.5; driftmon_observe(m, &v, 1); }
+
+    driftmon_compute(m, nullptr, nullptr);
+    CHECK(cap.call_count == 1);
+    CHECK(cap.last_severity == DRIFTMON_STABLE);
+    CHECK_NEAR(cap.last_max_psi, 0.0, 1e-9);
+    driftmon_destroy(m);
+}
+
+// Callback receives SIGNIFICANT severity for a heavily drifted window.
+TEST(callback_fires_significant_on_drift) {
+    std::string path = write_tmp("cb_significant", VALID_1F);
+    driftmon_t* m = driftmon_create(path.c_str());
+    CHECK(m != nullptr);
+
+    CallbackCapture cap;
+    driftmon_set_callback(m, capture_cb, &cap);
+
+    double v = 0.5;  // all in bucket 0 → significant drift
+    for (int i = 0; i < 10; ++i) driftmon_observe(m, &v, 1);
+    driftmon_compute(m, nullptr, nullptr);
+
+    CHECK(cap.call_count == 1);
+    CHECK(cap.last_severity == DRIFTMON_SIGNIFICANT);
+    CHECK(cap.last_max_psi > 0.2);
+    driftmon_destroy(m);
+}
+
+// Callback receives WARNING severity for a moderately drifted window.
+// actual=[0.7, 0.2, 0.1] vs ref=[0.5, 0.3, 0.2] → PSI ≈ 0.177 (in [0.1, 0.2)).
+TEST(callback_fires_warning_on_moderate_drift) {
+    std::string path = write_tmp("cb_warning", VALID_1F);
+    driftmon_t* m = driftmon_create(path.c_str());
+    CHECK(m != nullptr);
+
+    CallbackCapture cap;
+    driftmon_set_callback(m, capture_cb, &cap);
+
+    // 7 in bucket 0, 2 in bucket 1, 1 in bucket 2.
+    double v;
+    for (int i = 0; i < 7; ++i) { v = 0.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 2; ++i) { v = 1.5; driftmon_observe(m, &v, 1); }
+    { v = 2.5; driftmon_observe(m, &v, 1); }
+
+    driftmon_compute(m, nullptr, nullptr);
+    CHECK(cap.call_count == 1);
+    CHECK(cap.last_severity == DRIFTMON_WARNING);
+    CHECK(cap.last_max_psi >= 0.1);
+    CHECK(cap.last_max_psi <  0.2);
+    driftmon_destroy(m);
+}
+
+// Setting fn to NULL unregisters the callback; subsequent compute must not call it.
+TEST(callback_null_unregisters) {
+    std::string path = write_tmp("cb_unreg", VALID_1F);
+    driftmon_t* m = driftmon_create(path.c_str());
+    CHECK(m != nullptr);
+
+    CallbackCapture cap;
+    driftmon_set_callback(m, capture_cb, &cap);
+
+    double v = 0.5;
+    for (int i = 0; i < 10; ++i) driftmon_observe(m, &v, 1);
+    driftmon_compute(m, nullptr, nullptr);
+    CHECK(cap.call_count == 1);
+
+    // Unregister and reset for a second window.
+    driftmon_set_callback(m, nullptr, nullptr);
+    driftmon_reset(m);
+    for (int i = 0; i < 10; ++i) driftmon_observe(m, &v, 1);
+    driftmon_compute(m, nullptr, nullptr);
+    CHECK(cap.call_count == 1);  // still 1 — callback was not fired again
+    driftmon_destroy(m);
+}
+
 int main() { return RUN_ALL(); }
