@@ -11,6 +11,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Required early: CMAKE_INSTALL_INCLUDEDIR/LIBDIR used in target_include_directories below.
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
 # Treat warnings seriously in the core (kept clean per SPEC.md).
 if(MSVC)
   add_compile_options(/W4)
@@ -118,8 +122,6 @@ endif()
 # Allows downstream projects to use:
 #   find_package(driftmon 1.0 CONFIG REQUIRED)
 #   target_link_libraries(my_app PRIVATE driftmon::driftmon)
-include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
 
 # Core library and public header.
 install(TARGETS driftmon
