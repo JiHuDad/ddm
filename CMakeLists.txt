@@ -1,7 +1,7 @@
-# driftmon — Phase 0 build skeleton.
+# driftmon — drift monitoring library.
 # Zero external dependencies. Standard library only. C++17.
 cmake_minimum_required(VERSION 3.14)
-project(driftmon LANGUAGES CXX VERSION 0.0.1)
+project(driftmon LANGUAGES CXX VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,7 +23,10 @@ add_library(driftmon STATIC
   src/driftmon.cpp
   src/json_min.cpp
 )
-target_include_directories(driftmon PUBLIC include)
+target_include_directories(driftmon PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 target_include_directories(driftmon PRIVATE src)
 
 # --- Tests (zero-dependency mini runner) -----------------------------------
@@ -41,7 +44,10 @@ option(DRIFTMON_ENABLE_PROMETHEUS "Build the Prometheus export adapter" OFF)
 
 if(DRIFTMON_ENABLE_PROMETHEUS)
   add_library(driftmon_export STATIC export/driftmon_export.cpp)
-  target_include_directories(driftmon_export PUBLIC export)
+  target_include_directories(driftmon_export PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/export>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  )
   target_link_libraries(driftmon_export PUBLIC driftmon)  # export -> core only
 
   add_executable(driftmon_export_tests tests/test_export.cpp)
@@ -107,3 +113,55 @@ if(DRIFTMON_ENABLE_EXAMPLES)
     message(WARNING "python3 not found — deepmimo_e2e test skipped")
   endif()
 endif()
+
+# --- Install / CMake package export ------------------------------------------
+# Allows downstream projects to use:
+#   find_package(driftmon 1.0 CONFIG REQUIRED)
+#   target_link_libraries(my_app PRIVATE driftmon::driftmon)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+# Core library and public header.
+install(TARGETS driftmon
+    EXPORT driftmonTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(FILES include/driftmon.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+# Optional Prometheus export adapter.
+if(DRIFTMON_ENABLE_PROMETHEUS)
+    install(TARGETS driftmon_export
+        EXPORT driftmonTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+    install(FILES export/driftmon_export.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+endif()
+
+# CMake package config files (for find_package support).
+install(EXPORT driftmonTargets
+    FILE driftmonTargets.cmake
+    NAMESPACE driftmon::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/driftmon
+)
+configure_package_config_file(
+    cmake/driftmonConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/driftmonConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/driftmon
+)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/driftmonConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/driftmonConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/driftmonConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/driftmon
+)

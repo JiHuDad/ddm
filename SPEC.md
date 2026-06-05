@@ -280,6 +280,14 @@ ctest --test-dir build --output-on-failure       # 미니 러너 테스트 green
   driftmon_t* driftmon_create_multi(const char** paths, int n);
   ```
 
+- **2026-06-05 — v1.0.0: 버전 매크로 + CMake install/export 추가.** 헤더에
+  `DRIFTMON_VERSION_MAJOR/MINOR/PATCH/DRIFTMON_VERSION` 상수 추가(하위호환 추가).
+  CMakeLists.txt에 `GNUInstallDirs` + `CMakePackageConfigHelpers` 기반 install 규칙과
+  `find_package(driftmon CONFIG)` 지원을 위한 `driftmonTargets.cmake` /
+  `driftmonConfig.cmake` / `driftmonConfigVersion.cmake` 생성 추가.
+  `SameMajorVersion` 호환 정책: MAJOR가 같으면 하위호환 보장.
+  git tag `v1.0.0` 지정.
+
 ---
 
 ## 8. 로드맵 (Roadmap)

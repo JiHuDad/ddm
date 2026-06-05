@@ -14,6 +14,12 @@
 #ifndef DRIFTMON_H
 #define DRIFTMON_H
 
+/* Library version (SemVer). Bump MAJOR on ABI break, MINOR on new API. */
+#define DRIFTMON_VERSION_MAJOR 1
+#define DRIFTMON_VERSION_MINOR 0
+#define DRIFTMON_VERSION_PATCH 0
+#define DRIFTMON_VERSION "1.0.0"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

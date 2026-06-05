@@ -273,6 +273,45 @@ if (driftmon_ready(dm)) {
 
 ---
 
+## CMake 연동 / CMake Integration
+
+Install the library with `cmake --install`, then use `find_package` in your project.
+
+```sh
+# Build and install (prefix example)
+cmake -S /path/to/ddm -B build -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake --build build
+cmake --install build
+```
+
+In your project's `CMakeLists.txt`:
+
+```cmake
+find_package(driftmon 1.0 CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE driftmon::driftmon)
+```
+
+This automatically adds the correct include path (`driftmon.h`) and links
+`libdriftmon.a`. No manual `-I` or `-L` flags needed.
+
+If you installed to a non-standard prefix, point CMake at it:
+
+```sh
+cmake -S . -B build -Ddriftmon_DIR=/usr/local/lib/cmake/driftmon
+```
+
+**Compile-time version check** — the header exposes version macros so you can
+guard against API incompatibilities at compile time:
+
+```c
+#include "driftmon.h"
+#if DRIFTMON_VERSION_MAJOR != 1
+#  error "Requires driftmon 1.x"
+#endif
+```
+
+---
+
 ## 상태 / Status
 
 | Phase | Description | Status |
