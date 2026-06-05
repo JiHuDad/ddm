@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: "${{ matrix.name }}"
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core-only
+            cmake_flags: ""
+
+          - name: +prometheus
+            cmake_flags: "-DDRIFTMON_ENABLE_PROMETHEUS=ON"
+
+          - name: +tools
+            cmake_flags: "-DDRIFTMON_ENABLE_TOOLS=ON"
+
+          - name: +examples
+            cmake_flags: "-DDRIFTMON_ENABLE_EXAMPLES=ON"
+
+          - name: all-on
+            cmake_flags: >-
+              -DDRIFTMON_ENABLE_PROMETHEUS=ON
+              -DDRIFTMON_ENABLE_TOOLS=ON
+              -DDRIFTMON_ENABLE_EXAMPLES=ON
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake g++ python3
+
+      - name: Configure
+        run: cmake -S . -B build ${{ matrix.cmake_flags }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
