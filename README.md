@@ -186,7 +186,10 @@ typedef enum {
 driftmon_severity_t driftmon_classify(double psi);
 
 // Multi-reference (Phase 6): psi_out[j] = max PSI across n references
-// All refs must share feature names, bucket counts, edges, and window_size.
+// All refs must share identical feature names, bucket counts, edges, and window_size.
+// Edges must match because driftmon_observe bins with references[0].edges — a ref
+// built on different edges would produce false drift. Intended use: multiple
+// historical baseline snapshots from the same training distribution (same edges).
 driftmon_t* driftmon_create_multi(const char** paths, int n);  // NULL on failure
 
 // Notification callback (Phase 6) — fired by compute after outputs are set
