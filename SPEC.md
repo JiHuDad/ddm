@@ -283,7 +283,7 @@ ctest --test-dir build --output-on-failure       # 미니 러너 테스트 green
   (`examples/onnx_integration/onnx_glue.cpp`). DeepMIMO 요약 특징(RSRP·주경로 지연·
   최강 경로 각도)으로 Zone A→E drift 재현 데모(`examples/deepmimo_demo/`).
   `DRIFTMON_ENABLE_EXAMPLES` 옵션 + `deepmimo_e2e` ctest.
-- **Phase 6 (계획):** 고급 모니터링 기능 세 가지 — 헤더 하위호환 추가(§7 결정 로그):
+- **Phase 6 (완료):** 고급 모니터링 기능 세 가지 — 헤더 하위호환 추가(§7 결정 로그):
   - **슬라이딩 윈도우**: `driftmon_create_ex` + `driftmon_window_mode_t`. rolling buffer.
   - **알림 콜백**: `driftmon_set_callback`. compute 직후 severity 통보.
   - **다중 레퍼런스 프로파일**: `driftmon_create_multi`. n개 레퍼런스 중 max PSI.

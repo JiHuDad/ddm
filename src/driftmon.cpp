@@ -91,6 +91,8 @@ driftmon_t* driftmon_create_multi(const char** paths, int n) {
     }
 
     // Validate all references are structurally compatible with refs[0].
+    // Edges must also match: driftmon_observe bins with refs[0].edges, so
+    // all ref_ratios must be calibrated against the same bin boundaries.
     const auto& base = refs[0];
     for (int i = 1; i < n; ++i) {
         if (refs[i].window_size != base.window_size) return nullptr;
@@ -99,6 +101,7 @@ driftmon_t* driftmon_create_multi(const char** paths, int n) {
             if (refs[i].features[j].name != base.features[j].name) return nullptr;
             if (refs[i].features[j].ref_ratios.size() !=
                 base.features[j].ref_ratios.size()) return nullptr;
+            if (refs[i].features[j].edges != base.features[j].edges) return nullptr;
         }
     }
 

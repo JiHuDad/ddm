@@ -650,4 +650,18 @@ TEST(multi_window_size_mismatch_rejected) {
     CHECK(driftmon_create_multi(paths, 2) == nullptr);
 }
 
+// Different edges are rejected: refs with different bin boundaries can't be
+// combined (observe bins with refs[0] edges; refs[i] ref_ratios must share them).
+TEST(multi_different_edges_rejected) {
+    // Same ratios and structure, but edges [0,10,20,30] instead of [0,1,2,3].
+    static const char* DIFF_EDGES =
+        "{\"version\":1,\"window_size\":10,\"features\":["
+        "{\"name\":\"x\",\"edges\":[0.0,10.0,20.0,30.0],\"ref_ratios\":[0.5,0.3,0.2]}"
+        "]}";
+    std::string p0 = write_tmp("multi_de0", VALID_1F);
+    std::string p1 = write_tmp("multi_de1", DIFF_EDGES);
+    const char* paths[] = {p0.c_str(), p1.c_str()};
+    CHECK(driftmon_create_multi(paths, 2) == nullptr);
+}
+
 int main() { return RUN_ALL(); }
