@@ -142,6 +142,9 @@ int  driftmon_ready   (const driftmon_t* m);                 // 윈도우 찼으
 void driftmon_compute (driftmon_t* m, double* psi_out, double* max_psi);
 driftmon_severity_t driftmon_classify(double psi);           // 임계값 분류(무상태)
 
+/* 다중 레퍼런스 — psi_out[j] = n개 레퍼런스 중 max PSI (Phase 6c, §7) */
+driftmon_t* driftmon_create_multi(const char** paths, int n); // NULL on failure/mismatch
+
 /* 알림 콜백 — compute 직후 호출; fn=NULL이면 해제 (Phase 6b, §7) */
 typedef void (*driftmon_callback_t)(driftmon_t* m, double max_psi,
                                     driftmon_severity_t severity, void* user_data);
@@ -160,6 +163,7 @@ void driftmon_destroy (driftmon_t* m);                       // NULL 안전
 - `driftmon_compute`: `psi_out`(길이 ≥ num_features)에 특징별 PSI, `max_psi`에 최댓값.
   두 out 인자 모두 NULL 가능(건너뜀). 유효 관측 0인 특징은 PSI=0 (§2.4).
 - `driftmon_classify`: PSI 값을 §2.3 임계값으로 분류. 무상태 순수 함수(핸들 불필요).
+- `driftmon_create_multi`: `n`개 레퍼런스를 로드. 모두 동일 feature_names·num_buckets·window_size이어야 함(불일치·로드 실패 시 NULL). `n=1`은 `driftmon_create`와 동일. 관측 binning은 `references[0]`의 edges 기준. `driftmon_compute`의 `psi_out[j]` = feature j에 대해 n개 레퍼런스 중 max PSI.
 - `driftmon_set_callback`: `fn`이 비-NULL이면 `driftmon_compute`가 `psi_out`/`max_psi`를 확정한 직후 호출. STABLE 포함 모든 severity에서 호출됨(필터링은 caller 책임). `fn=NULL`이면 콜백 해제. `m=NULL`이면 no-op.
 - `driftmon_reset`: **텀블링** — 참조는 그대로 두고 현재 윈도우 누적만 초기화. **슬라이딩** — no-op, rolling buffer 유지 (§2.5).
 - `driftmon_destroy`: 모든 자원 해제. NULL 호출 안전.

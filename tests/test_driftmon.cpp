@@ -550,4 +550,104 @@ TEST(callback_null_unregisters) {
     driftmon_destroy(m);
 }
 
+// ─── Phase 6: multi-reference profiles ───────────────────────────────────────
+
+// A second reference: same structure as VALID_1F but ref_ratios all shifted
+// (all weight in bucket 2). This should produce a high PSI when combined with
+// a window that matches VALID_1F's distribution.
+static const char* VALID_1F_ALT =
+    "{"
+    "  \"version\": 1,"
+    "  \"window_size\": 10,"
+    "  \"features\": [{"
+    "    \"name\": \"x\","
+    "    \"edges\": [0.0, 1.0, 2.0, 3.0],"
+    "    \"ref_ratios\": [0.2, 0.3, 0.5]"
+    "  }]"
+    "}";
+
+// n=1 produces the same result as driftmon_create.
+TEST(multi_n1_same_as_create) {
+    std::string p = write_tmp("multi_n1", VALID_1F);
+    const char* paths[] = {p.c_str()};
+    driftmon_t* m = driftmon_create_multi(paths, 1);
+    CHECK(m != nullptr);
+    CHECK(driftmon_num_features(m) == 1);
+
+    // Fill with reference distribution → PSI~0.
+    double v;
+    for (int i = 0; i < 5; ++i) { v = 0.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 3; ++i) { v = 1.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 2; ++i) { v = 2.5; driftmon_observe(m, &v, 1); }
+    double psi, max_psi;
+    driftmon_compute(m, &psi, &max_psi);
+    CHECK_NEAR(psi, 0.0, 1e-9);
+    driftmon_destroy(m);
+}
+
+// n=2: psi_out[j] must be max(PSI vs ref0, PSI vs ref1).
+// Window matches VALID_1F → PSI~0 vs ref0. vs VALID_1F_ALT (different ratios)
+// PSI > 0. The reported PSI must be the higher of the two.
+TEST(multi_n2_reports_max_psi) {
+    std::string p0 = write_tmp("multi_r0", VALID_1F);
+    std::string p1 = write_tmp("multi_r1", VALID_1F_ALT);
+    const char* paths[] = {p0.c_str(), p1.c_str()};
+    driftmon_t* m = driftmon_create_multi(paths, 2);
+    CHECK(m != nullptr);
+
+    // Feed window matching VALID_1F ratios.
+    double v;
+    for (int i = 0; i < 5; ++i) { v = 0.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 3; ++i) { v = 1.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 2; ++i) { v = 2.5; driftmon_observe(m, &v, 1); }
+
+    double psi_single, max_psi_single;
+    {
+        // Compare against a single-reference monitor (VALID_1F_ALT only).
+        const char* sp[] = {p1.c_str()};
+        driftmon_t* ms = driftmon_create_multi(sp, 1);
+        for (int i = 0; i < 5; ++i) { v = 0.5; driftmon_observe(ms, &v, 1); }
+        for (int i = 0; i < 3; ++i) { v = 1.5; driftmon_observe(ms, &v, 1); }
+        for (int i = 0; i < 2; ++i) { v = 2.5; driftmon_observe(ms, &v, 1); }
+        driftmon_compute(ms, &psi_single, &max_psi_single);
+        driftmon_destroy(ms);
+    }
+
+    double psi_multi, max_psi_multi;
+    driftmon_compute(m, &psi_multi, &max_psi_multi);
+    // Multi-reference PSI must equal the single-alt PSI (it's the larger one).
+    CHECK_NEAR(psi_multi, psi_single, 1e-9);
+    CHECK(psi_multi > 0.0);
+    driftmon_destroy(m);
+}
+
+// Null/invalid inputs return NULL.
+TEST(multi_null_inputs_return_null) {
+    CHECK(driftmon_create_multi(nullptr, 1) == nullptr);
+    CHECK(driftmon_create_multi(nullptr, 0) == nullptr);
+    std::string p = write_tmp("multi_null", VALID_1F);
+    const char* paths[] = {p.c_str()};
+    CHECK(driftmon_create_multi(paths, 0) == nullptr);  // n < 1
+}
+
+// Schema mismatch (different feature count) is rejected.
+TEST(multi_schema_mismatch_rejected) {
+    std::string p0 = write_tmp("multi_mis0", VALID_1F);   // 1 feature
+    std::string p1 = write_tmp("multi_mis1", VALID_2F);   // 2 features
+    const char* paths[] = {p0.c_str(), p1.c_str()};
+    CHECK(driftmon_create_multi(paths, 2) == nullptr);
+}
+
+// window_size mismatch is rejected.
+TEST(multi_window_size_mismatch_rejected) {
+    static const char* WS5 =
+        "{\"version\":1,\"window_size\":5,\"features\":["
+        "{\"name\":\"x\",\"edges\":[0.0,1.0,2.0,3.0],\"ref_ratios\":[0.5,0.3,0.2]}"
+        "]}";
+    std::string p0 = write_tmp("multi_ws0", VALID_1F);  // window_size=10
+    std::string p1 = write_tmp("multi_ws1", WS5);       // window_size=5
+    const char* paths[] = {p0.c_str(), p1.c_str()};
+    CHECK(driftmon_create_multi(paths, 2) == nullptr);
+}
+
 int main() { return RUN_ALL(); }

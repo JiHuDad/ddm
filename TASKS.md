@@ -71,8 +71,8 @@
       `driftmon_compute`가 `psi_out` 확정 직후 콜백 호출. `fn=NULL`이면 해제.
 - [x] **테스트:** 콜백 호출 타이밍(compute 직후), NULL 해제 안전성, STABLE/WARNING/SIGNIFICANT
       각각에서 호출 확인, 콜백 미등록 시 crash 없음.
-- [ ] **구현:** 다중 레퍼런스 프로파일 — `driftmon_create_multi(paths, n)`. n개 레퍼런스
+- [x] **구현:** 다중 레퍼런스 프로파일 — `driftmon_create_multi(paths, n)`. n개 레퍼런스
       로드; `driftmon_compute`의 `psi_out[j]` = feature j의 n개 레퍼런스 max PSI;
       스키마 불일치(feature 수·버킷 수·window_size 다름) 시 NULL 반환.
-- [ ] **테스트:** `n=1` 단일(기존 `driftmon_create`와 동일 결과), `n=2` max 선택 검증,
+- [x] **테스트:** `n=1` 단일(기존 `driftmon_create`와 동일 결과), `n=2` max 선택 검증,
       스키마 불일치(feature 수 다름·window_size 다름) 거부, NULL 경로 안전성.
