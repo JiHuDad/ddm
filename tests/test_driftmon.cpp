@@ -503,6 +503,30 @@ TEST(callback_fires_significant_on_drift) {
     driftmon_destroy(m);
 }
 
+// Callback receives WARNING severity for a moderately drifted window.
+// actual=[0.7, 0.2, 0.1] vs ref=[0.5, 0.3, 0.2] → PSI ≈ 0.177 (in [0.1, 0.2)).
+TEST(callback_fires_warning_on_moderate_drift) {
+    std::string path = write_tmp("cb_warning", VALID_1F);
+    driftmon_t* m = driftmon_create(path.c_str());
+    CHECK(m != nullptr);
+
+    CallbackCapture cap;
+    driftmon_set_callback(m, capture_cb, &cap);
+
+    // 7 in bucket 0, 2 in bucket 1, 1 in bucket 2.
+    double v;
+    for (int i = 0; i < 7; ++i) { v = 0.5; driftmon_observe(m, &v, 1); }
+    for (int i = 0; i < 2; ++i) { v = 1.5; driftmon_observe(m, &v, 1); }
+    { v = 2.5; driftmon_observe(m, &v, 1); }
+
+    driftmon_compute(m, nullptr, nullptr);
+    CHECK(cap.call_count == 1);
+    CHECK(cap.last_severity == DRIFTMON_WARNING);
+    CHECK(cap.last_max_psi >= 0.1);
+    CHECK(cap.last_max_psi <  0.2);
+    driftmon_destroy(m);
+}
+
 // Setting fn to NULL unregisters the callback; subsequent compute must not call it.
 TEST(callback_null_unregisters) {
     std::string path = write_tmp("cb_unreg", VALID_1F);
