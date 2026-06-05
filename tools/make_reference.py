@@ -147,8 +147,8 @@ def read_csv(path, feature_names):
 
 def write_reference(profile, path):
     """Write profile dict to JSON at path."""
-    with open(path, "w") as f:
-        json.dump(profile, f, indent=2)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(profile, f, indent=2, ensure_ascii=False)
         f.write("\n")
 
 
