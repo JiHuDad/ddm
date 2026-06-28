@@ -76,3 +76,80 @@
       스키마 불일치(feature 수·버킷 수·window_size 다름) 시 NULL 반환.
 - [x] **테스트:** `n=1` 단일(기존 `driftmon_create`와 동일 결과), `n=2` max 선택 검증,
       스키마 불일치(feature 수 다름·window_size 다름) 거부, NULL 경로 안전성.
+
+## driftmon-cpp Phase 1 — C/C++ 서빙 프레임워크 P0 코어 (완료)
+
+정본: [SPEC-cpp.md](SPEC-cpp.md). 코드는 `cpp/` 트리, `DRIFTMON_ENABLE_CPP=ON`(기본 OFF).
+코어(`include/driftmon.h`, `src/driftmon.cpp`)는 불변; `dm::JsonParser`만 재사용 위해
+`src/json_min.{h,cpp}`에서 generic 프리미티브로 승격(내부 헤더, 동결 ABI 무관).
+
+- [x] **구현:** shm ABI(`cpp/include/driftmon/shm_abi.h`) — ArenaHeader/SlotHeader POD,
+      magic/version, 더블버퍼 + seq/active_idx/inflight/sample_count, golden sizeof/offsetof
+      static_assert, lock-free 단언.
+- [x] **테스트:** `test_shm_abi` — 레이아웃 invariant, arena create/attach 왕복,
+      magic/version/n_bins 불일치 attach 거부.
+- [x] **구현:** 번들 파서/검증(`cpp/src/bundle.{h,cpp}`) — 새 스키마(§5.4), 입력+출력 평탄화,
+      R4.1 검증 + R4.2 게이트(위반 시 명확 에러로 거부).
+- [x] **테스트:** `test_bundle` — 유효 파싱, window 디폴트, 각 위반(필드 누락/길이 불일치/
+      비단조 edges/음수/중복 index/빈 features/trailing) 거부.
+- [x] **구현:** PSI detector(`cpp/src/psi_detector.{h,cpp}`, `detector.h`) — 물리 bin ratio,
+      ε=1e-4, 0.2 threshold. 코어 PSI 공식 패리티.
+- [x] **테스트:** `test_psi_detector` — 동일분포 PSI≈0, shift 알람, out-of-range 알람,
+      무관측 무드리프트, 물리 bin ref ratio 레이아웃.
+- [x] **구현:** shm arena(`cpp/src/shm_arena.{h,cpp}`) — shm_open+mmap create/attach/detach/unlink.
+- [x] **구현:** 탭(`cpp/src/tap_init.cpp` 콜드 + `cpp/src/tap_hot.cpp` 핫, `arena_rt.h`) —
+      no-op degrade, no-clamp 비닝, drain 가드(inflight + active 재확인). hot path noexcept.
+- [x] **테스트:** `test_tap_noop` — init 실패 시 no-op 안전성 + 단일모델 누적/비닝 정확성(AC2).
+- [x] **검증:** `tap_symbol_audit` — `nm`으로 tap_hot.o 미정의 심볼에 malloc/new/throw/lock/
+      syscall 없음 정적 증명(NFR1/NFR6). `bench_tap_latency` — p50 수십 ns + 힙 할당 0(AC1).
+- [x] **구현:** worker(`cpp/src/worker.{h,cpp}`, `worker_main.cpp`) — swap+drain+read+zero,
+      window(N개 OR T초) + warm-up 가드, ModelMonitor.
+- [x] **테스트:** `test_arena_concurrency`(AC2 무손상), `test_warmup_guard`(AC5 보류).
+- [x] **CI/문서:** CI 매트릭스 `+cpp`·`all-on`에 `DRIFTMON_ENABLE_CPP=ON` 추가; SPEC-cpp.md
+      §11 결정 로그(no-clamp/seqlock-not-load-bearing/D2 drain/edges-in-process/디폴트).
+
+## driftmon-cpp Phase 2 — 다모델·계약·KS·장애 격리 (완료)
+
+정본 [SPEC-cpp.md](SPEC-cpp.md) §12. AC3·4·6·7·8·10(부분) 충족. Phase 1 ABI/hot-path 불변.
+
+- [x] **구현:** KS detector(`cpp/src/ks_detector.{h,cpp}`) — 물리 bin 누적분포 최대격차,
+      `ks_threshold`(미설정 0.1). `bundle.tests`로 PSI/KS 선택, 미지정 시 `["psi"]`.
+- [x] **테스트:** `test_ks_detector` — 동일분포 0, 알려진 shift 기대값(0.75), 임계 경계.
+- [x] **구현:** 다중 detector — `ModelMonitor` 피처별 detector 리스트, 피처 점수=최대,
+      모델 알람=임의 detector 알람.
+- [x] **구현:** 다모델 worker — `WorkerSet.load`/`load_dir`(POSIX dirent), `tick_all`;
+      `worker_main` `--bundle`(반복)/`--bundle-dir`. 단일 worker가 전 model_id 처리(G3).
+- [x] **테스트:** `test_multimodel` — 잘못된 번들 게이트 격리(AC7), 코드 변경 없는 모델
+      추가(AC8).
+- [x] **구현:** 재기동 안전 — `arena_open_or_create`(레이아웃 일치 시 제로화 없이 인수).
+- [x] **테스트:** `test_fault_isolation`(AC6) — worker crash 후 탭 무영향 + 재기동 arena
+      재사용으로 누적 데이터 보존.
+- [x] **테스트:** `test_detect` — shift 시 PSI/KS 알람(AC3), 정상분포 무알람(AC4), 경계
+      이탈 mass 검출.
+- [x] **검증:** worker_main 바이너리 end-to-end 기동/종료 + shm 정리 확인. 심볼 audit 유지.
+
+## driftmon-cpp Phase 3 — 운영화: export·스트리밍·코어핀 (완료)
+
+정본 [SPEC-cpp.md](SPEC-cpp.md) §13. AC9·AC10 충족 → Phase 1·2·3로 AC1~AC10 전부 충족.
+
+- [x] **구현:** 스트리밍 detector — CUSUM(`cusum_detector.*`, 기준평균 대비 양/음 누적합)·
+      ADWIN(`adwin_detector.*`, bounded 윈도우 분할 + Hoeffding 변화 검출). 신호 = 물리 bin
+      평균 인덱스(`histogram_mean_bin`). `bundle.tests`에 `cusum`/`adwin` 추가.
+- [x] **테스트:** `test_streaming_detectors` — 안정 구간 무알람, 지속 shift 시 CUSUM 알람·
+      알람 후 리셋, 급변 시 ADWIN 검출.
+- [x] **구현:** export(`export.*`) — Prometheus 텍스트(tmp+rename 원자적 교체) + JSON 아티팩트
+      sink, `make_exporter` 팩토리. best-effort(실패 false·로깅, 루프 지속).
+- [x] **테스트:** `test_cpp_export` — Prometheus/JSON 렌더 필드, 파일 원자적 기록, 잘못된
+      타깃 best-effort 실패, 팩토리.
+- [x] **구현:** 코어 핀(`affinity.*`, NFR3) — `--cpu` 리스트 파싱 + `sched_setaffinity`(best-
+      effort). worker SCHED_OTHER 유지.
+- [x] **구현:** worker_main 통합 — `--export prometheus|file --export-target`, `--cpu`;
+      평가 시 ExportRecord 생성·export, 모델별 generation.
+- [x] **검증:** worker_main end-to-end(export·cpu 플래그) 기동/clean SIGTERM 종료·shm 정리.
+      잘못된 export kind 거부. 벤치 하네스(`bench_tap_latency`) AC1 유지.
+
+## driftmon-cpp — 남은 작업 (이어받기)
+
+Phase 1·2·3 완료(AC1~AC10). 다음 작업·진입점·미해결 질문은 **[cpp/ROADMAP.md](cpp/ROADMAP.md)**
+에 정리. 요약: Phase 4(모델 의존성 메타데이터 슬롯 예약, 귀속 미구현) + 운영 연계(단일 arena
+옵션, hot-add, 실제 export 전송, 정식 ADWIN, KS 통계화, RT 실측).

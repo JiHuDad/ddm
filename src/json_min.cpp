@@ -17,147 +17,162 @@
 
 namespace dm {
 
-namespace {
+// --- Generic JSON primitives (dm::JsonParser, declared in json_min.h) -------
+// Shared by the reference.json loader and the driftmon-cpp bundle parser.
 
-struct Parser {
-    const char* p;
-    const char* end;
+void JsonParser::skip_ws() {
+    while (p < end && std::isspace(static_cast<unsigned char>(*p))) ++p;
+}
 
-    void skip_ws() {
-        while (p < end && std::isspace(static_cast<unsigned char>(*p))) ++p;
-    }
+bool JsonParser::peek(char c) {
+    skip_ws();
+    return p < end && *p == c;
+}
 
-    bool peek(char c) {
-        skip_ws();
-        return p < end && *p == c;
-    }
+bool JsonParser::consume(char c) {
+    if (!peek(c)) return false;
+    ++p;
+    return true;
+}
 
-    bool consume(char c) {
-        if (!peek(c)) return false;
-        ++p;
-        return true;
-    }
-
-    bool parse_string(std::string& s) {
-        if (!consume('"')) return false;
-        s.clear();
-        while (p < end && *p != '"') {
-            if (*p == '\\') {
-                ++p;
-                if (p >= end) return false;
-                switch (*p) {
-                    case '"':  s += '"';  break;
-                    case '\\': s += '\\'; break;
-                    case '/':  s += '/';  break;
-                    case 'n':  s += '\n'; break;
-                    case 'r':  s += '\r'; break;
-                    case 't':  s += '\t'; break;
-                    case 'b':  s += '\b'; break;
-                    case 'f':  s += '\f'; break;
-                    case 'u': {
-                        // \uXXXX — 4 hex digits follow; decode to UTF-8.
-                        // p currently points at 'u'; hex digits are at p[1]..p[4].
-                        if (p + 4 >= end) return false;
-                        uint32_t cp = 0;
-                        for (int i = 1; i <= 4; ++i) {
-                            char c2 = p[i];
-                            uint32_t nibble;
-                            if      (c2 >= '0' && c2 <= '9') nibble = static_cast<uint32_t>(c2 - '0');
-                            else if (c2 >= 'a' && c2 <= 'f') nibble = static_cast<uint32_t>(c2 - 'a' + 10);
-                            else if (c2 >= 'A' && c2 <= 'F') nibble = static_cast<uint32_t>(c2 - 'A' + 10);
-                            else return false;
-                            cp = (cp << 4) | nibble;
-                        }
-                        p += 4;  // outer ++p will step past the 4th hex digit
-                        if (cp < 0x80u) {
-                            s += static_cast<char>(cp);
-                        } else if (cp < 0x800u) {
-                            s += static_cast<char>(0xC0u | (cp >> 6));
-                            s += static_cast<char>(0x80u | (cp & 0x3Fu));
-                        } else {
-                            s += static_cast<char>(0xE0u | (cp >> 12));
-                            s += static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu));
-                            s += static_cast<char>(0x80u | (cp & 0x3Fu));
-                        }
-                        break;
+bool JsonParser::parse_string(std::string& s) {
+    if (!consume('"')) return false;
+    s.clear();
+    while (p < end && *p != '"') {
+        if (*p == '\\') {
+            ++p;
+            if (p >= end) return false;
+            switch (*p) {
+                case '"':  s += '"';  break;
+                case '\\': s += '\\'; break;
+                case '/':  s += '/';  break;
+                case 'n':  s += '\n'; break;
+                case 'r':  s += '\r'; break;
+                case 't':  s += '\t'; break;
+                case 'b':  s += '\b'; break;
+                case 'f':  s += '\f'; break;
+                case 'u': {
+                    // \uXXXX — 4 hex digits follow; decode to UTF-8.
+                    // p currently points at 'u'; hex digits are at p[1]..p[4].
+                    if (p + 4 >= end) return false;
+                    uint32_t cp = 0;
+                    for (int i = 1; i <= 4; ++i) {
+                        char c2 = p[i];
+                        uint32_t nibble;
+                        if      (c2 >= '0' && c2 <= '9') nibble = static_cast<uint32_t>(c2 - '0');
+                        else if (c2 >= 'a' && c2 <= 'f') nibble = static_cast<uint32_t>(c2 - 'a' + 10);
+                        else if (c2 >= 'A' && c2 <= 'F') nibble = static_cast<uint32_t>(c2 - 'A' + 10);
+                        else return false;
+                        cp = (cp << 4) | nibble;
                     }
-                    default: return false;
+                    p += 4;  // outer ++p will step past the 4th hex digit
+                    if (cp < 0x80u) {
+                        s += static_cast<char>(cp);
+                    } else if (cp < 0x800u) {
+                        s += static_cast<char>(0xC0u | (cp >> 6));
+                        s += static_cast<char>(0x80u | (cp & 0x3Fu));
+                    } else {
+                        s += static_cast<char>(0xE0u | (cp >> 12));
+                        s += static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu));
+                        s += static_cast<char>(0x80u | (cp & 0x3Fu));
+                    }
+                    break;
                 }
-            } else {
-                s += *p;
+                default: return false;
             }
-            ++p;
+        } else {
+            s += *p;
         }
-        return consume('"');
+        ++p;
     }
+    return consume('"');
+}
 
-    bool parse_number(double& v) {
-        skip_ws();
-        char* nend = nullptr;
-        errno = 0;
-        v = std::strtod(p, &nend);
-        if (nend == p || errno == ERANGE) return false;
-        if (!std::isfinite(v)) return false;  // NaN / Inf not valid in reference.json
-        p = nend;
-        return true;
+bool JsonParser::parse_number(double& v) {
+    skip_ws();
+    char* nend = nullptr;
+    errno = 0;
+    v = std::strtod(p, &nend);
+    if (nend == p || errno == ERANGE) return false;
+    if (!std::isfinite(v)) return false;  // NaN / Inf not valid
+    p = nend;
+    return true;
+}
+
+bool JsonParser::parse_int(int& v) {
+    double d;
+    if (!parse_number(d)) return false;
+    if (d != std::floor(d)) return false;              // reject fractional (e.g. 1.5)
+    if (d < static_cast<double>(INT_MIN) ||
+        d > static_cast<double>(INT_MAX)) return false;
+    v = static_cast<int>(d);
+    return true;
+}
+
+// Skip an unknown value (string, number, array, object, or literal).
+bool JsonParser::skip_value() {
+    skip_ws();
+    if (p >= end) return false;
+    if (*p == '"') {
+        std::string s;
+        return parse_string(s);
     }
-
-    bool parse_int(int& v) {
-        double d;
-        if (!parse_number(d)) return false;
-        if (d != std::floor(d)) return false;              // reject fractional (e.g. 1.5)
-        if (d < static_cast<double>(INT_MIN) ||
-            d > static_cast<double>(INT_MAX)) return false;
-        v = static_cast<int>(d);
-        return true;
-    }
-
-    // Skip an unknown value (string, number, array, object, or literal).
-    bool skip_value() {
-        skip_ws();
-        if (p >= end) return false;
-        if (*p == '"') {
-            std::string s;
-            return parse_string(s);
+    if (*p == '[') {
+        ++p;
+        while (!peek(']')) {
+            if (!skip_value()) return false;
+            if (!consume(',')) break;
         }
-        if (*p == '[') {
-            ++p;
-            while (!peek(']')) {
-                if (!skip_value()) return false;
-                if (!consume(',')) break;
-            }
-            return consume(']');
-        }
-        if (*p == '{') {
-            ++p;
-            while (!peek('}')) {
-                std::string k;
-                if (!parse_string(k)) return false;
-                if (!consume(':')) return false;
-                if (!skip_value()) return false;
-                if (!consume(',')) break;
-            }
-            return consume('}');
-        }
-        // Number, true, false, null — scan until delimiter.
-        const char* start = p;
-        while (p < end && *p != ',' && *p != ']' && *p != '}' &&
-               !std::isspace(static_cast<unsigned char>(*p))) ++p;
-        return p > start;
-    }
-
-    bool parse_double_array(std::vector<double>& arr) {
-        if (!consume('[')) return false;
-        arr.clear();
-        if (peek(']')) { ++p; return true; }
-        do {
-            double v;
-            if (!parse_number(v)) return false;
-            arr.push_back(v);
-        } while (consume(','));
         return consume(']');
     }
+    if (*p == '{') {
+        ++p;
+        while (!peek('}')) {
+            std::string k;
+            if (!parse_string(k)) return false;
+            if (!consume(':')) return false;
+            if (!skip_value()) return false;
+            if (!consume(',')) break;
+        }
+        return consume('}');
+    }
+    // Number, true, false, null — scan until delimiter.
+    const char* start = p;
+    while (p < end && *p != ',' && *p != ']' && *p != '}' &&
+           !std::isspace(static_cast<unsigned char>(*p))) ++p;
+    return p > start;
+}
 
+bool JsonParser::parse_double_array(std::vector<double>& arr) {
+    if (!consume('[')) return false;
+    arr.clear();
+    if (peek(']')) { ++p; return true; }
+    do {
+        double v;
+        if (!parse_number(v)) return false;
+        arr.push_back(v);
+    } while (consume(','));
+    return consume(']');
+}
+
+bool JsonParser::parse_int_array(std::vector<long>& arr) {
+    if (!consume('[')) return false;
+    arr.clear();
+    if (peek(']')) { ++p; return true; }
+    do {
+        double v;
+        if (!parse_number(v)) return false;
+        if (v != std::floor(v)) return false;  // counts must be integral
+        arr.push_back(static_cast<long>(v));
+    } while (consume(','));
+    return consume(']');
+}
+
+// --- Reference.json schema (old) parsing, built on JsonParser ---------------
+
+namespace {
+
+struct Parser : JsonParser {
     bool parse_feature(FeatureRef& f) {
         if (!consume('{')) return false;
         bool got_name = false, got_edges = false, got_ratios = false;
@@ -243,7 +258,9 @@ bool load_reference(const std::string& path, ReferenceProfile& out) {
     if (!file) return false;
     std::string src((std::istreambuf_iterator<char>(file)),
                      std::istreambuf_iterator<char>());
-    Parser parser{src.c_str(), src.c_str() + src.size()};
+    Parser parser;
+    parser.p = src.c_str();
+    parser.end = src.c_str() + src.size();
     ReferenceProfile tmp;
     if (!parser.parse(tmp)) return false;
     parser.skip_ws();
