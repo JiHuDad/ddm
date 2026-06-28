@@ -147,3 +147,9 @@
       평가 시 ExportRecord 생성·export, 모델별 generation.
 - [x] **검증:** worker_main end-to-end(export·cpu 플래그) 기동/clean SIGTERM 종료·shm 정리.
       잘못된 export kind 거부. 벤치 하네스(`bench_tap_latency`) AC1 유지.
+
+## driftmon-cpp — 남은 작업 (이어받기)
+
+Phase 1·2·3 완료(AC1~AC10). 다음 작업·진입점·미해결 질문은 **[cpp/ROADMAP.md](cpp/ROADMAP.md)**
+에 정리. 요약: Phase 4(모델 의존성 메타데이터 슬롯 예약, 귀속 미구현) + 운영 연계(단일 arena
+옵션, hot-add, 실제 export 전송, 정식 ADWIN, KS 통계화, RT 실측).
