@@ -274,6 +274,10 @@ cpp/
     affinity.*       코어 핀(sched_setaffinity).
     worker_main.cpp  worker 실행 파일: 인자 파싱 → 번들 로드 → 루프.
   tests/             13개 테스트 + 심볼 감사 + 지연 벤치 (아래 검증 참고).
+  examples/deepmimo_cpp/
+    make_bundle.py   Zone A 학습 CSV → 신규 번들 스키마(분위수 비닝).
+    tap_driver.cpp   "서빙 프로세스" 대역: CSV를 진짜 탭으로 재생(엔진 비의존).
+    run_demo.py      크로스-프로세스 E2E 오케스트레이터(gen→bundle→worker⇄tap→검증).
 SPEC-cpp.md          형식 규격 + 설계 결정 로그(§11~13).
 cpp/ROADMAP.md       이어받기용 남은 작업·진입점.
 cpp/DESIGN.md        (이 문서) 해설서.
@@ -300,11 +304,25 @@ ctest --test-dir build --output-on-failure
 ```
 
 **검증 결과(오늘 기준):**
-- 전 옵션 ON에서 **19/19 테스트 통과** (코어 6 + cpp 12 + 심볼 감사 1).
+- 전 옵션 ON에서 **20/20 테스트 통과** (코어 6 + cpp 13 + 심볼 감사 1).
 - `DRIFTMON_ENABLE_CPP=OFF` 빌드는 기존과 **byte-for-byte 동일**(회귀 0).
 - 탭 지연 p50 ≈ 77ns, 힙 할당 0. 동시성 20만 카운트 정확 일치.
 - worker 바이너리 end-to-end 기동 → clean SIGTERM 종료 시 공유메모리 정리 확인.
+- **크로스-프로세스 E2E 데모(`deepmimo_cpp_e2e`):** 별도 worker 프로세스 + 별도 tap 프로세스가
+  진짜 shm으로 통신. DeepMIMO Zone A(LOS)/Zone E(NLOS) 합성 데이터 2000샘플 재생 →
+  **Zone A: max_score 0.043 → STABLE(severity 0)**, **Zone E: 13.85 → SIGNIFICANT(severity 2)**.
+  Prometheus export로 자동 검증. 즉 부품이 아니라 **조립된 기계가 실데이터성 드리프트를 잡는
+  것**까지 박제됐다.
 - **SPEC-cpp 수용 기준 AC1~AC10 전부 충족.**
+
+### E2E 데모 직접 돌려보기
+
+```sh
+cmake -S . -B build -DDRIFTMON_ENABLE_CPP=ON && cmake --build build
+python3 cpp/examples/deepmimo_cpp/run_demo.py --build-dir build
+#  → gen_zones(데이터) → make_bundle(번들) → worker 프로세스 ⇄ tap_driver 프로세스
+#     Phase A: STABLE  /  Phase E: SIGNIFICANT  (둘 다 PASS면 성공)
+```
 
 ---
 

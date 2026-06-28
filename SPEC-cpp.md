@@ -215,3 +215,13 @@ Phase 3 범위(SPEC §9): export + ADWIN/CUSUM 스트리밍 + 코어 핀 + 벤�
 
 **Phase 1·2·3 = 전 AC(AC1~AC10) 충족.** 운영 연계(실제 MinIO 업로드/HTTP 노출, RT 커널 실측,
 번들 산출 파이프라인 §10 Q1)는 off-box·배포 환경 영역으로 본 SPEC 범위 밖.
+
+### 크로스-프로세스 E2E 데모 (실데이터 통합 검증)
+
+`cpp/examples/deepmimo_cpp/` + ctest `deepmimo_cpp_e2e`: **별도 worker 프로세스 + 별도 tap
+프로세스**가 진짜 POSIX shm으로 통신하는 전체 파이프라인을 DeepMIMO Zone A(LOS)/Zone E(NLOS)
+합성 데이터로 검증한다. `gen_zones.py`(데이터) → `make_bundle.py`(분위수 번들) → `driftmon_worker`
+(shm 생성·export) ⇄ `tap_driver`(CSV를 진짜 탭으로 재생). 결과: **Zone A → max PSI≈0.04 →
+severity 0(STABLE)**, **Zone E → max PSI≈13.8 → severity 2(SIGNIFICANT)** 를 Prometheus export로
+자동 단언. AC3/AC4를 합성 주입이 아니라 **크로스-프로세스 실데이터 흐름으로** 재확인한다.
+(엔진 비의존이라 실제 ONNX 모델은 불필요 — CSV 피처 스트림이 모델 입력 공간 대역.)

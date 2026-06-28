@@ -178,6 +178,23 @@ if(DRIFTMON_ENABLE_CPP)
             -DOBJ=$<TARGET_OBJECTS:driftmon_tap_hot>
             -DNM=${CMAKE_NM}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cpp/tests/symbol_audit.cmake)
+
+  # --- Cross-process end-to-end demo (real tap process + worker process) ---
+  # tap_driver replays a CSV through the real tap; run_demo.py drives the worker
+  # and asserts Zone A=STABLE / Zone E=SIGNIFICANT via the Prometheus export.
+  add_executable(tap_driver cpp/examples/deepmimo_cpp/tap_driver.cpp)
+  target_link_libraries(tap_driver PRIVATE driftmon_cpp)
+  target_include_directories(tap_driver PRIVATE cpp/src)
+
+  find_program(PYTHON3_CPP python3)
+  if(PYTHON3_CPP)
+    add_test(NAME deepmimo_cpp_e2e
+      COMMAND ${PYTHON3_CPP} ${CMAKE_SOURCE_DIR}/cpp/examples/deepmimo_cpp/run_demo.py
+              --build-dir ${CMAKE_BINARY_DIR})
+    set_tests_properties(deepmimo_cpp_e2e PROPERTIES TIMEOUT 120)
+  else()
+    message(WARNING "python3 not found — deepmimo_cpp_e2e demo test skipped")
+  endif()
 endif()
 
 # --- Install / CMake package export ------------------------------------------
