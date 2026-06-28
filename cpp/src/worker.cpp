@@ -4,6 +4,9 @@
 #include <atomic>
 #include <thread>
 
+#include <dirent.h>
+
+#include "ks_detector.h"
 #include "psi_detector.h"
 
 namespace driftmon {
@@ -99,14 +102,28 @@ uint64_t slot_swap_read(SlotHeader* s, std::vector<Histogram>& out,
 bool ModelMonitor::init(const Bundle& b, std::string& err) {
     bundle_ = b;
     SlotSpec spec = slot_spec_from_bundle(b);
-    if (!arena_create(arena_, arena_name(b.model_id), spec, err)) return false;
+    if (!arena_open_or_create(arena_, arena_name(b.model_id), spec, reused_arena_, err))
+        return false;
 
-    refs_ = feature_refs_from_bundle(b);
+    refs_ = feature_refs_from_bundle(b);   // ref_ratios over physical bins
     detectors_.clear();
-    for (const auto& r : refs_) {
-        auto d = std::make_unique<PsiDetector>();
-        d->configure(r);
-        detectors_.push_back(std::move(d));
+    detectors_.resize(refs_.size());       // default-construct (vectors not copyable)
+    for (size_t f = 0; f < refs_.size(); ++f) {
+        for (const std::string& test : b.tests) {
+            FeatureRef r = refs_[f];
+            std::unique_ptr<Detector> d;
+            if (test == "psi") {
+                r.threshold = b.features[f].psi_threshold;
+                d = std::make_unique<PsiDetector>();
+            } else if (test == "ks") {
+                r.threshold = b.features[f].ks_threshold;
+                d = std::make_unique<KsDetector>();
+            } else {
+                continue;   // unknown detector name ignored (forward-compat)
+            }
+            d->configure(r);
+            detectors_[f].push_back(std::move(d));
+        }
     }
     reset_window();
     return true;
@@ -125,10 +142,15 @@ ModelVerdict ModelMonitor::evaluate() {
     v.window_samples = accum_samples_;
     v.per_feature.resize(detectors_.size());
     for (size_t f = 0; f < detectors_.size(); ++f) {
-        DriftResult r = detectors_[f]->eval(accum_[f]);
-        v.per_feature[f] = r;
-        if (r.score > v.max_score) v.max_score = r.score;
-        if (r.alarm) v.alarm = true;
+        DriftResult feat;   // worst detector for this feature
+        for (auto& det : detectors_[f]) {
+            DriftResult r = det->eval(accum_[f]);
+            if (r.score > feat.score) feat.score = r.score;
+            if (r.alarm) feat.alarm = true;
+        }
+        v.per_feature[f] = feat;
+        if (feat.score > v.max_score) v.max_score = feat.score;
+        if (feat.alarm) v.alarm = true;
     }
     return v;
 }
@@ -179,6 +201,48 @@ ModelMonitor::~ModelMonitor() {
     } else {
         arena_detach(arena_);
     }
+}
+
+// --- WorkerSet ---------------------------------------------------------------
+
+size_t WorkerSet::load(const std::vector<std::string>& bundle_paths) {
+    for (const std::string& path : bundle_paths) {
+        Bundle b;
+        std::string err;
+        if (!load_bundle(path, b, err)) {            // R4.2 gate: skip, record, continue
+            errors_.push_back(path + ": " + err);
+            continue;
+        }
+        auto mon = std::make_unique<ModelMonitor>();
+        if (!mon->init(b, err)) {
+            errors_.push_back(path + ": " + err);
+            continue;
+        }
+        monitors_.push_back(std::move(mon));
+    }
+    return monitors_.size();
+}
+
+size_t WorkerSet::load_dir(const std::string& dir) {
+    std::vector<std::string> paths;
+    if (DIR* d = opendir(dir.c_str())) {
+        while (struct dirent* e = readdir(d)) {
+            const std::string name = e->d_name;
+            if (name.size() > 5 && name.compare(name.size() - 5, 5, ".json") == 0)
+                paths.push_back(dir + "/" + name);
+        }
+        closedir(d);
+    } else {
+        errors_.push_back(dir + ": cannot open bundle directory");
+    }
+    return load(paths);
+}
+
+void WorkerSet::tick_all(double elapsed_seconds, std::vector<ModelVerdict>& out) {
+    out.clear();
+    out.reserve(monitors_.size());
+    for (auto& m : monitors_)
+        out.push_back(m->tick(elapsed_seconds));   // independent: no cross-model coupling
 }
 
 }  // namespace driftmon

@@ -122,6 +122,27 @@ fail:
     return false;
 }
 
+bool arena_open_or_create(Arena& a, const std::string& name, const SlotSpec& spec,
+                          bool& reused, std::string& err) {
+    reused = false;
+    // Probe for an existing, layout-compatible arena (worker restart case).
+    Arena probe;
+    std::string perr;
+    if (arena_attach(probe, name, spec.n_bins_total, perr)) {
+        SlotHeader* s = probe.slot(0);
+        const bool match = s->n_features == spec.n_features &&
+                           std::string(s->model_id) == spec.model_id;
+        if (match) {
+            probe.is_owner = true;   // we take over ownership (keep tap data intact)
+            a = probe;
+            reused = true;
+            return true;
+        }
+        arena_detach(probe);         // name collision / stale layout — recreate
+    }
+    return arena_create(a, name, spec, err);
+}
+
 void arena_detach(Arena& a) {
     if (a.base) munmap(a.base, a.bytes);
     if (a.fd >= 0) close(a.fd);

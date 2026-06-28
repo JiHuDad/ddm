@@ -107,3 +107,23 @@
 - [x] **테스트:** `test_arena_concurrency`(AC2 무손상), `test_warmup_guard`(AC5 보류).
 - [x] **CI/문서:** CI 매트릭스 `+cpp`·`all-on`에 `DRIFTMON_ENABLE_CPP=ON` 추가; SPEC-cpp.md
       §11 결정 로그(no-clamp/seqlock-not-load-bearing/D2 drain/edges-in-process/디폴트).
+
+## driftmon-cpp Phase 2 — 다모델·계약·KS·장애 격리 (완료)
+
+정본 [SPEC-cpp.md](SPEC-cpp.md) §12. AC3·4·6·7·8·10(부분) 충족. Phase 1 ABI/hot-path 불변.
+
+- [x] **구현:** KS detector(`cpp/src/ks_detector.{h,cpp}`) — 물리 bin 누적분포 최대격차,
+      `ks_threshold`(미설정 0.1). `bundle.tests`로 PSI/KS 선택, 미지정 시 `["psi"]`.
+- [x] **테스트:** `test_ks_detector` — 동일분포 0, 알려진 shift 기대값(0.75), 임계 경계.
+- [x] **구현:** 다중 detector — `ModelMonitor` 피처별 detector 리스트, 피처 점수=최대,
+      모델 알람=임의 detector 알람.
+- [x] **구현:** 다모델 worker — `WorkerSet.load`/`load_dir`(POSIX dirent), `tick_all`;
+      `worker_main` `--bundle`(반복)/`--bundle-dir`. 단일 worker가 전 model_id 처리(G3).
+- [x] **테스트:** `test_multimodel` — 잘못된 번들 게이트 격리(AC7), 코드 변경 없는 모델
+      추가(AC8).
+- [x] **구현:** 재기동 안전 — `arena_open_or_create`(레이아웃 일치 시 제로화 없이 인수).
+- [x] **테스트:** `test_fault_isolation`(AC6) — worker crash 후 탭 무영향 + 재기동 arena
+      재사용으로 누적 데이터 보존.
+- [x] **테스트:** `test_detect` — shift 시 PSI/KS 알람(AC3), 정상분포 무알람(AC4), 경계
+      이탈 mass 검출.
+- [x] **검증:** worker_main 바이너리 end-to-end 기동/종료 + shm 정리 확인. 심볼 audit 유지.

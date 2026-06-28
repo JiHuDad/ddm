@@ -2,7 +2,7 @@
 
 | 항목 | 값 |
 |---|---|
-| Status | Draft v0.1 — Phase 1 구현 완료 |
+| Status | Draft v0.1 — Phase 1·2 구현 완료 |
 | Owner | MLOps / 서빙 운영 |
 | 대상 구현자 | Claude Code (SDD 워크플로우) |
 | 언어/환경 | C/C++ (C++17), Linux, POSIX shm, 잠재적 RT 커널 |
@@ -140,6 +140,26 @@ ctest --test-dir build`.
 6. **출력도 탭.** 입력+출력을 입력 먼저인 하나의 평탄 피처공간으로 모델링(`n_features =
    n_in + n_out`), hot path 동일.
 
+## 12. Phase 2 (P0 다중·계약) 구현 노트
+
+Phase 2 범위(SPEC §9): 다모델 슬롯 + 번들 검증·게이트(다모델) + KS detector + 장애 격리.
+**AC3·AC4·AC6·AC7·AC8 충족.** 추가 결정:
+
+7. **모델별 arena (슬롯 1개) × N.** §4 다이어그램은 단일 arena에 다중 슬롯을 그리지만,
+   구현은 **단일 worker 프로세스가 모델별 arena(`/driftmon.<model_id>`, 슬롯 1개)를 N개
+   소유**한다. 기능 동일하되 (a) 장애 격리가 모델 단위로 자연스럽고, (b) 모델 추가(AC8)가
+   새 shm 하나로 끝나며, (c) Phase 1 ABI/hot-path를 안 건드린다. `slot_count`/`slot_offset[]`
+   는 향후 in-arena 다중 슬롯 확장 여지로 보존. `WorkerSet`이 G3(단일 worker, 다 model_id)을 담당.
+8. **재기동 안전 reuse (AC6).** worker는 `arena_open_or_create`로 기동한다 — 레이아웃·model_id가
+   일치하는 기존 arena가 있으면 **제로화 없이 그대로 인수**(실행 중 탭이 쌓던 데이터 보존),
+   없으면 새로 생성. worker crash는 별도 프로세스라 서빙에 전파되지 않고(구조적 격리), 재기동
+   시 기존 arena를 재연결해 모니터링이 복구된다.
+9. **다중 detector / KS.** `bundle.tests`가 피처별 detector(PSI/KS)를 선택. 미지정 시 `["psi"]`.
+   KS = 물리 bin 누적분포 최대격차, 임계 `ks_threshold`(미설정 0.1). 피처 점수 = 그 피처의
+   detector 중 최대, 모델 알람 = 임의 detector 알람.
+10. **다모델 게이트 (AC7).** `WorkerSet.load`는 잘못된 번들을 **건너뛰고 `errors()`에 기록**한
+    뒤 나머지 모델을 정상 가동 — 한 모델의 스키마 위반이 형제 모델·서빙에 영향 없음.
+
 ### 수용 기준 진행 (Phase 1)
 
 - [x] AC1. 탭 hot path 오버헤드 — 벤치 p50 ≈ 수십 ns, hot-path 힙 할당 0(전역 new 후킹).
@@ -149,8 +169,19 @@ ctest --test-dir build`.
       swapping reader에서 무손실·무손상·무중복(`test_tap_noop`, `test_arena_concurrency`).
 - [x] AC5. warm-up 가드 — min_samples 미만이면 판정 보류, 시간이 윈도우를 닫아도 보류 유지
       (`test_warmup_guard`).
-- [ ] AC3·AC4·AC6·AC7(부분)·AC8 — Phase 2.
-- [ ] AC9·AC10(KS/ADWIN) — Phase 3.
+### 수용 기준 진행 (Phase 2)
 
-> Phase 2(P0 다중·계약): 다모델 슬롯 + KS + 장애 격리 통합 테스트.
-> Phase 3(P1 운영화): export(Prometheus/MinIO) + ADWIN/CUSUM + 코어 핀 + 벤치 하네스.
+- [x] AC3. reference 대비 입력 분포를 인위적으로 shift시키면 PSI/KS가 threshold 초과 알람
+      (`test_detect` true_positive·out_of_range).
+- [x] AC4. 정상(reference와 동일) 분포에서는 알람 미발생(`test_detect` false_positive_suppressed).
+- [x] AC6. worker crash → 서빙 무영향(별도 프로세스), 재기동 시 기존 arena 재연결로 데이터·
+      모니터링 복구(`test_fault_isolation`).
+- [x] AC7. 번들 필수 필드 누락 시 해당 모델만 비활성 + 명확 에러, 형제 모델 무영향
+      (`test_multimodel` gate_isolates_bad_bundle).
+- [x] AC8. 새 모델(번들 추가)을 코드 수정 없이 등록 → worker 인식(`test_multimodel`
+      code_free_model_registration; worker_main `--bundle`/`--bundle-dir`).
+- [x] AC10(부분). KS 알려진 입력 기대 출력 검증(`test_ks_detector`).
+- [ ] AC9 (export) — Phase 3.
+- [ ] AC10 (ADWIN/CUSUM) — Phase 3.
+
+> Phase 3(P1 운영화): export(Prometheus/MinIO) + ADWIN/CUSUM 스트리밍 + 코어 핀 구성 + 벤치 하네스.

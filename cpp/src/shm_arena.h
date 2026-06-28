@@ -45,6 +45,13 @@ bool arena_create(Arena& a, const std::string& name, const SlotSpec& spec,
 bool arena_attach(Arena& a, const std::string& name,
                   uint32_t expected_n_bins_total, std::string& err);
 
+// Worker side, restart-safe (AC6): reuse a matching existing arena IN PLACE
+// (preserving whatever the still-running taps have accumulated) instead of
+// wiping it. If none exists, or layout/model disagree, create a fresh one.
+// `reused` reports which path was taken. The arena is owned either way.
+bool arena_open_or_create(Arena& a, const std::string& name, const SlotSpec& spec,
+                          bool& reused, std::string& err);
+
 void arena_detach(Arena& a);          // unmap + close (does not unlink)
 void arena_unlink(const std::string& name);  // remove the shm name (owner cleanup)
 

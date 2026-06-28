@@ -137,6 +137,7 @@ if(DRIFTMON_ENABLE_CPP)
     cpp/src/tap_init.cpp
     cpp/src/bundle.cpp
     cpp/src/psi_detector.cpp
+    cpp/src/ks_detector.cpp
     cpp/src/worker.cpp
     $<TARGET_OBJECTS:driftmon_tap_hot>
   )
@@ -153,7 +154,8 @@ if(DRIFTMON_ENABLE_CPP)
 
   # --- tests ---
   foreach(t test_shm_abi test_bundle test_psi_detector test_warmup_guard
-            test_tap_noop test_arena_concurrency)
+            test_tap_noop test_arena_concurrency test_ks_detector test_detect
+            test_multimodel test_fault_isolation)
     add_executable(${t} cpp/tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE driftmon_cpp)
     target_include_directories(${t} PRIVATE cpp/src tests)

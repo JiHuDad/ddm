@@ -23,6 +23,7 @@ struct BundleFeature {
     std::vector<double> bin_edges;     // length = interior_bins + 1, strictly increasing
     std::vector<long>   ref_hist;      // length = interior_bins (training counts)
     double psi_threshold = 0.2;        // default per SPEC if unset
+    double ks_threshold = 0.1;         // default if unset (DRIFTMON_DEFAULT_KS_THRESHOLD)
 
     // interior bins (= ref_hist.size()); physical bins add underflow+overflow.
     size_t interior_bins() const { return ref_hist.size(); }

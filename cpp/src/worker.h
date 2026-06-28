@@ -67,8 +67,10 @@ struct ModelVerdict {
 
 class ModelMonitor {
 public:
-    // Create the arena and build detectors from a validated bundle.
+    // Create (or, on worker restart, reuse — AC6) the arena and build the
+    // detectors named in bundle.tests for each feature.
     bool init(const Bundle& b, std::string& err);
+    bool reused_existing_arena() const { return reused_arena_; }
 
     // One worker tick: swap-read the slot, accumulate, and decide using the
     // elapsed time since the current window opened. Produces a verdict when the
@@ -88,9 +90,33 @@ private:
     Bundle bundle_;
     Arena arena_;
     std::vector<FeatureRef> refs_;
-    std::vector<std::unique_ptr<Detector>> detectors_;
+    // Per-feature list of detectors (PSI/KS/... selected by bundle.tests).
+    std::vector<std::vector<std::unique_ptr<Detector>>> detectors_;
     std::vector<Histogram> accum_;   // per-feature accumulated counts this window
     long accum_samples_ = 0;
+    bool reused_arena_ = false;
+};
+
+// --- Multi-model worker (G3: one process, many model_ids) --------------------
+// Loads several bundles; an invalid bundle is GATED (skipped with a recorded
+// error) without affecting the others (AC7). New models are added simply by
+// providing more bundles — no code change (AC8).
+class WorkerSet {
+public:
+    // Returns the number of models successfully brought up. Invalid/failed ones
+    // are recorded in errors() as "path: reason".
+    size_t load(const std::vector<std::string>& bundle_paths);
+    size_t load_dir(const std::string& dir);   // all *.json in dir
+
+    void tick_all(double elapsed_seconds, std::vector<ModelVerdict>& out);
+
+    size_t size() const { return monitors_.size(); }
+    ModelMonitor& at(size_t i) { return *monitors_[i]; }
+    const std::vector<std::string>& errors() const { return errors_; }
+
+private:
+    std::vector<std::unique_ptr<ModelMonitor>> monitors_;
+    std::vector<std::string> errors_;
 };
 
 }  // namespace driftmon

@@ -44,6 +44,8 @@ bool parse_feature(dm::JsonParser& jp, BundleFeature& f, bool is_output, int& in
             got_hist = true;
         } else if (key == "psi_threshold") {
             if (!jp.parse_number(f.psi_threshold)) return false;
+        } else if (key == "ks_threshold") {
+            if (!jp.parse_number(f.ks_threshold)) return false;
         } else if (key == "index") {
             if (!jp.parse_int(index_out)) return false;
         } else {
@@ -170,6 +172,7 @@ bool parse_bundle(const std::string& json, Bundle& out, std::string& err) {
     // Apply window defaults (R3.3) before validation/use.
     if (b.min_samples <= 0) b.min_samples = DRIFTMON_DEFAULT_MIN_SAMPLES;
     if (b.max_seconds <= 0) b.max_seconds = DRIFTMON_DEFAULT_MAX_SECONDS;
+    if (b.tests.empty()) b.tests.push_back("psi");   // default detector
 
     if (!validate(b, indices, err)) return false;
     out = std::move(b);
