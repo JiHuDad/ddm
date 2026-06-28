@@ -6,6 +6,8 @@
 
 #include <dirent.h>
 
+#include "adwin_detector.h"
+#include "cusum_detector.h"
 #include "ks_detector.h"
 #include "psi_detector.h"
 
@@ -118,6 +120,10 @@ bool ModelMonitor::init(const Bundle& b, std::string& err) {
             } else if (test == "ks") {
                 r.threshold = b.features[f].ks_threshold;
                 d = std::make_unique<KsDetector>();
+            } else if (test == "cusum") {
+                d = std::make_unique<CusumDetector>();   // streaming (R3.4)
+            } else if (test == "adwin") {
+                d = std::make_unique<AdwinDetector>();    // streaming (R3.4)
             } else {
                 continue;   // unknown detector name ignored (forward-compat)
             }
@@ -152,6 +158,7 @@ ModelVerdict ModelMonitor::evaluate() {
         if (feat.score > v.max_score) v.max_score = feat.score;
         if (feat.alarm) v.alarm = true;
     }
+    v.histograms = accum_;   // snapshot for export (R5.1)
     return v;
 }
 

@@ -127,3 +127,23 @@
 - [x] **테스트:** `test_detect` — shift 시 PSI/KS 알람(AC3), 정상분포 무알람(AC4), 경계
       이탈 mass 검출.
 - [x] **검증:** worker_main 바이너리 end-to-end 기동/종료 + shm 정리 확인. 심볼 audit 유지.
+
+## driftmon-cpp Phase 3 — 운영화: export·스트리밍·코어핀 (완료)
+
+정본 [SPEC-cpp.md](SPEC-cpp.md) §13. AC9·AC10 충족 → Phase 1·2·3로 AC1~AC10 전부 충족.
+
+- [x] **구현:** 스트리밍 detector — CUSUM(`cusum_detector.*`, 기준평균 대비 양/음 누적합)·
+      ADWIN(`adwin_detector.*`, bounded 윈도우 분할 + Hoeffding 변화 검출). 신호 = 물리 bin
+      평균 인덱스(`histogram_mean_bin`). `bundle.tests`에 `cusum`/`adwin` 추가.
+- [x] **테스트:** `test_streaming_detectors` — 안정 구간 무알람, 지속 shift 시 CUSUM 알람·
+      알람 후 리셋, 급변 시 ADWIN 검출.
+- [x] **구현:** export(`export.*`) — Prometheus 텍스트(tmp+rename 원자적 교체) + JSON 아티팩트
+      sink, `make_exporter` 팩토리. best-effort(실패 false·로깅, 루프 지속).
+- [x] **테스트:** `test_cpp_export` — Prometheus/JSON 렌더 필드, 파일 원자적 기록, 잘못된
+      타깃 best-effort 실패, 팩토리.
+- [x] **구현:** 코어 핀(`affinity.*`, NFR3) — `--cpu` 리스트 파싱 + `sched_setaffinity`(best-
+      effort). worker SCHED_OTHER 유지.
+- [x] **구현:** worker_main 통합 — `--export prometheus|file --export-target`, `--cpu`;
+      평가 시 ExportRecord 생성·export, 모델별 generation.
+- [x] **검증:** worker_main end-to-end(export·cpu 플래그) 기동/clean SIGTERM 종료·shm 정리.
+      잘못된 export kind 거부. 벤치 하네스(`bench_tap_latency`) AC1 유지.

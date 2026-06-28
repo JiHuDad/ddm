@@ -2,7 +2,7 @@
 
 | 항목 | 값 |
 |---|---|
-| Status | Draft v0.1 — Phase 1·2 구현 완료 |
+| Status | Draft v0.1 — Phase 1·2·3 구현 완료 |
 | Owner | MLOps / 서빙 운영 |
 | 대상 구현자 | Claude Code (SDD 워크플로우) |
 | 언어/환경 | C/C++ (C++17), Linux, POSIX shm, 잠재적 RT 커널 |
@@ -160,6 +160,30 @@ Phase 2 범위(SPEC §9): 다모델 슬롯 + 번들 검증·게이트(다모델)
 10. **다모델 게이트 (AC7).** `WorkerSet.load`는 잘못된 번들을 **건너뛰고 `errors()`에 기록**한
     뒤 나머지 모델을 정상 가동 — 한 모델의 스키마 위반이 형제 모델·서빙에 영향 없음.
 
+## 13. Phase 3 (P1 운영화) 구현 노트
+
+Phase 3 범위(SPEC §9): export + ADWIN/CUSUM 스트리밍 + 코어 핀 + 벤치 하네스.
+**AC9·AC10 충족.** 추가 결정:
+
+11. **스트리밍 detector (R3.4).** PSI/KS는 윈도우 배치, CUSUM/ADWIN은 **평가된 윈도우 간
+    상태를 유지**하는 스트리밍 변형. 둘 다 신호로 **물리 bin 평균 인덱스**(`histogram_mean_bin`)를
+    사용한다(에지 불필요). CUSUM = 기준 평균 대비 양/음 누적합, `h` 초과 시 알람 후 리셋.
+    ADWIN = 최근 신호의 bounded 윈도우를 분할해 두 부분평균 차가 Hoeffding 한계를 넘으면
+    변화로 보고 오래된 부분을 버림(단순화 변형, 전체 지수 히스토그램 알고리즘은 아님).
+    `bundle.tests`에 `"cusum"`/`"adwin"` 추가로 활성화. 단순화상 윈도우 단위 갱신(원 SPEC의
+    raw 스냅샷 단위가 아니라) — tier-1 조기경보에 충분.
+
+12. **export (R5.x, AC9).** worker가 평가 시점에 모델별 {피처 점수·알람, severity, 히스토그램
+    스냅샷, generation, timestamp}를 내보낸다. 두 sink를 구성 가능(`--export`):
+    `prometheus`(텍스트를 tmp+rename로 원자적 파일 교체 — node_exporter textfile collector 패턴)
+    또는 `file`(모델·seq별 JSON 아티팩트 — MinIO 적재 대상). **best-effort(R5.3)**: write 실패는
+    false 반환·로깅만, worker 루프는 계속(throw 없음). 실제 MinIO 업로드/HTTP 노출은 off-box.
+
+13. **코어 핀 (NFR3).** `--cpu 2,3`로 worker를 housekeeping 코어에 `sched_setaffinity` 핀(best-
+    effort, 실패는 로깅 후 계속). worker는 SCHED_OTHER 유지(서빙 SCHED_FIFO 선점 불가).
+
+14. **벤치 하네스 (AC1).** `bench_tap_latency`가 hot-path p50/p99 + 힙 할당 0을 측정·게이트.
+
 ### 수용 기준 진행 (Phase 1)
 
 - [x] AC1. 탭 hot path 오버헤드 — 벤치 p50 ≈ 수십 ns, hot-path 힙 할당 0(전역 new 후킹).
@@ -181,7 +205,13 @@ Phase 2 범위(SPEC §9): 다모델 슬롯 + 번들 검증·게이트(다모델)
 - [x] AC8. 새 모델(번들 추가)을 코드 수정 없이 등록 → worker 인식(`test_multimodel`
       code_free_model_registration; worker_main `--bundle`/`--bundle-dir`).
 - [x] AC10(부분). KS 알려진 입력 기대 출력 검증(`test_ks_detector`).
-- [ ] AC9 (export) — Phase 3.
-- [ ] AC10 (ADWIN/CUSUM) — Phase 3.
 
-> Phase 3(P1 운영화): export(Prometheus/MinIO) + ADWIN/CUSUM 스트리밍 + 코어 핀 구성 + 벤치 하네스.
+### 수용 기준 진행 (Phase 3)
+
+- [x] AC9. export 메트릭/파일에 모델별 점수·히스토그램·severity·generation·타임스탬프 기록
+      — Prometheus 텍스트(원자적 파일 교체) + JSON 아티팩트 sink, best-effort(`test_cpp_export`).
+- [x] AC10. PSI/KS/ADWIN/CUSUM 각각 알려진 입력 기대 출력 검증(`test_psi_detector`,
+      `test_ks_detector`, `test_streaming_detectors`).
+
+**Phase 1·2·3 = 전 AC(AC1~AC10) 충족.** 운영 연계(실제 MinIO 업로드/HTTP 노출, RT 커널 실측,
+번들 산출 파이프라인 §10 Q1)는 off-box·배포 환경 영역으로 본 SPEC 범위 밖.

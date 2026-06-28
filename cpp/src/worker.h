@@ -63,6 +63,7 @@ struct ModelVerdict {
     double max_score = 0.0;
     bool alarm = false;
     std::vector<DriftResult> per_feature;
+    std::vector<Histogram> histograms;   // per-feature snapshot at evaluate time (for export)
 };
 
 class ModelMonitor {

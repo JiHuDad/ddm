@@ -42,6 +42,23 @@ public:
     virtual ~Detector() = default;
 };
 
+// Mean physical-bin index of a histogram — the scalar drift signal the
+// streaming detectors (CUSUM/ADWIN) track across windows.
+inline double histogram_mean_bin(const Histogram& h) {
+    if (h.total == 0) return 0.0;
+    double acc = 0.0;
+    for (size_t k = 0; k < h.counts.size(); ++k)
+        acc += static_cast<double>(k) * static_cast<double>(h.counts[k]);
+    return acc / static_cast<double>(h.total);
+}
+
+// Mean physical-bin index implied by a reference ratio vector.
+inline double ratios_mean_bin(const std::vector<double>& r) {
+    double acc = 0.0, sum = 0.0;
+    for (size_t k = 0; k < r.size(); ++k) { acc += static_cast<double>(k) * r[k]; sum += r[k]; }
+    return sum > 0.0 ? acc / sum : 0.0;
+}
+
 }  // namespace driftmon
 
 #endif  // DRIFTMON_DETECTOR_H
