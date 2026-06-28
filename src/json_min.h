@@ -15,6 +15,26 @@
 // opaque `struct driftmon` tag fixed by the frozen public header.
 namespace dm {
 
+// Generic recursive-descent JSON primitives, shared by the reference.json
+// loader (old schema) and the driftmon-cpp bundle parser (new schema, §5.4).
+// NOT a general-purpose JSON library — just the audited scalar/array/string
+// primitives both schemas need. Schema-specific object shapes live with each
+// consumer. Standard library only.
+struct JsonParser {
+    const char* p;
+    const char* end;
+
+    void skip_ws();
+    bool peek(char c);
+    bool consume(char c);
+    bool parse_string(std::string& s);
+    bool parse_number(double& v);
+    bool parse_int(int& v);
+    bool skip_value();                              // skip any value (unknown key)
+    bool parse_double_array(std::vector<double>& arr);
+    bool parse_int_array(std::vector<long>& arr);   // for bundle ref_hist counts
+};
+
 // Per-feature reference profile: bucket edges and the reference ratios
 // (fraction of reference samples falling in each bucket).
 struct FeatureRef {

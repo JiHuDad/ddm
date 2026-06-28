@@ -76,3 +76,34 @@
       스키마 불일치(feature 수·버킷 수·window_size 다름) 시 NULL 반환.
 - [x] **테스트:** `n=1` 단일(기존 `driftmon_create`와 동일 결과), `n=2` max 선택 검증,
       스키마 불일치(feature 수 다름·window_size 다름) 거부, NULL 경로 안전성.
+
+## driftmon-cpp Phase 1 — C/C++ 서빙 프레임워크 P0 코어 (완료)
+
+정본: [SPEC-cpp.md](SPEC-cpp.md). 코드는 `cpp/` 트리, `DRIFTMON_ENABLE_CPP=ON`(기본 OFF).
+코어(`include/driftmon.h`, `src/driftmon.cpp`)는 불변; `dm::JsonParser`만 재사용 위해
+`src/json_min.{h,cpp}`에서 generic 프리미티브로 승격(내부 헤더, 동결 ABI 무관).
+
+- [x] **구현:** shm ABI(`cpp/include/driftmon/shm_abi.h`) — ArenaHeader/SlotHeader POD,
+      magic/version, 더블버퍼 + seq/active_idx/inflight/sample_count, golden sizeof/offsetof
+      static_assert, lock-free 단언.
+- [x] **테스트:** `test_shm_abi` — 레이아웃 invariant, arena create/attach 왕복,
+      magic/version/n_bins 불일치 attach 거부.
+- [x] **구현:** 번들 파서/검증(`cpp/src/bundle.{h,cpp}`) — 새 스키마(§5.4), 입력+출력 평탄화,
+      R4.1 검증 + R4.2 게이트(위반 시 명확 에러로 거부).
+- [x] **테스트:** `test_bundle` — 유효 파싱, window 디폴트, 각 위반(필드 누락/길이 불일치/
+      비단조 edges/음수/중복 index/빈 features/trailing) 거부.
+- [x] **구현:** PSI detector(`cpp/src/psi_detector.{h,cpp}`, `detector.h`) — 물리 bin ratio,
+      ε=1e-4, 0.2 threshold. 코어 PSI 공식 패리티.
+- [x] **테스트:** `test_psi_detector` — 동일분포 PSI≈0, shift 알람, out-of-range 알람,
+      무관측 무드리프트, 물리 bin ref ratio 레이아웃.
+- [x] **구현:** shm arena(`cpp/src/shm_arena.{h,cpp}`) — shm_open+mmap create/attach/detach/unlink.
+- [x] **구현:** 탭(`cpp/src/tap_init.cpp` 콜드 + `cpp/src/tap_hot.cpp` 핫, `arena_rt.h`) —
+      no-op degrade, no-clamp 비닝, drain 가드(inflight + active 재확인). hot path noexcept.
+- [x] **테스트:** `test_tap_noop` — init 실패 시 no-op 안전성 + 단일모델 누적/비닝 정확성(AC2).
+- [x] **검증:** `tap_symbol_audit` — `nm`으로 tap_hot.o 미정의 심볼에 malloc/new/throw/lock/
+      syscall 없음 정적 증명(NFR1/NFR6). `bench_tap_latency` — p50 수십 ns + 힙 할당 0(AC1).
+- [x] **구현:** worker(`cpp/src/worker.{h,cpp}`, `worker_main.cpp`) — swap+drain+read+zero,
+      window(N개 OR T초) + warm-up 가드, ModelMonitor.
+- [x] **테스트:** `test_arena_concurrency`(AC2 무손상), `test_warmup_guard`(AC5 보류).
+- [x] **CI/문서:** CI 매트릭스 `+cpp`·`all-on`에 `DRIFTMON_ENABLE_CPP=ON` 추가; SPEC-cpp.md
+      §11 결정 로그(no-clamp/seqlock-not-load-bearing/D2 drain/edges-in-process/디폴트).

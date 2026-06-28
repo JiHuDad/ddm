@@ -27,11 +27,15 @@ jobs:
           - name: +examples
             cmake_flags: "-DDRIFTMON_ENABLE_EXAMPLES=ON"
 
+          - name: +cpp
+            cmake_flags: "-DDRIFTMON_ENABLE_CPP=ON"
+
           - name: all-on
             cmake_flags: >-
               -DDRIFTMON_ENABLE_PROMETHEUS=ON
               -DDRIFTMON_ENABLE_TOOLS=ON
               -DDRIFTMON_ENABLE_EXAMPLES=ON
+              -DDRIFTMON_ENABLE_CPP=ON
 
     steps:
       - uses: actions/checkout@v4

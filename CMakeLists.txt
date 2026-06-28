@@ -118,6 +118,61 @@ if(DRIFTMON_ENABLE_EXAMPLES)
   endif()
 endif()
 
+# --- driftmon-cpp: C/C++ serving drift-monitoring framework (Phase 1) --------
+# Default OFF. Air-gapped: standard library + POSIX (rt/pthread) only, no
+# external packages. When OFF the core library and every other option above are
+# byte-for-byte unaffected (mirrors the PROMETHEUS/TOOLS pattern).
+option(DRIFTMON_ENABLE_CPP "Build the C++ tap/worker drift-monitoring framework" OFF)
+
+if(DRIFTMON_ENABLE_CPP)
+  find_package(Threads REQUIRED)
+  find_library(RT_LIB rt)   # POSIX shm_open; folded into libc on some systems
+
+  # Hot path in its own object so the symbol audit can inspect just this TU.
+  add_library(driftmon_tap_hot OBJECT cpp/src/tap_hot.cpp)
+  target_include_directories(driftmon_tap_hot PRIVATE cpp/include cpp/src src)
+
+  add_library(driftmon_cpp STATIC
+    cpp/src/shm_arena.cpp
+    cpp/src/tap_init.cpp
+    cpp/src/bundle.cpp
+    cpp/src/psi_detector.cpp
+    cpp/src/worker.cpp
+    $<TARGET_OBJECTS:driftmon_tap_hot>
+  )
+  target_include_directories(driftmon_cpp
+    PUBLIC  cpp/include
+    PRIVATE cpp/src src)
+  target_link_libraries(driftmon_cpp PUBLIC driftmon Threads::Threads)  # driftmon: reuse dm::JsonParser
+  if(RT_LIB)
+    target_link_libraries(driftmon_cpp PUBLIC ${RT_LIB})
+  endif()
+
+  add_executable(driftmon_worker cpp/src/worker_main.cpp)
+  target_link_libraries(driftmon_worker PRIVATE driftmon_cpp)
+
+  # --- tests ---
+  foreach(t test_shm_abi test_bundle test_psi_detector test_warmup_guard
+            test_tap_noop test_arena_concurrency)
+    add_executable(${t} cpp/tests/${t}.cpp)
+    target_link_libraries(${t} PRIVATE driftmon_cpp)
+    target_include_directories(${t} PRIVATE cpp/src tests)
+    add_test(NAME ${t} COMMAND ${t})
+  endforeach()
+
+  # Latency bench: built, not a gating ctest.
+  add_executable(bench_tap_latency cpp/tests/bench_tap_latency.cpp)
+  target_link_libraries(bench_tap_latency PRIVATE driftmon_cpp)
+  target_include_directories(bench_tap_latency PRIVATE cpp/src tests)
+
+  # Static proof: tap hot path references no malloc/new/throw/lock/syscall.
+  add_test(NAME tap_symbol_audit
+    COMMAND ${CMAKE_COMMAND}
+            -DOBJ=$<TARGET_OBJECTS:driftmon_tap_hot>
+            -DNM=${CMAKE_NM}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cpp/tests/symbol_audit.cmake)
+endif()
+
 # --- Install / CMake package export ------------------------------------------
 # Allows downstream projects to use:
 #   find_package(driftmon 1.0 CONFIG REQUIRED)
