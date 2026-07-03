@@ -153,4 +153,11 @@ void arena_unlink(const std::string& name) {
     shm_unlink(shm_name(name).c_str());
 }
 
+bool arena_is_stale(const Arena& a) {
+    if (a.fd < 0) return false;
+    struct stat st;
+    if (fstat(a.fd, &st) != 0) return true;   // fd gone bad — treat as stale
+    return st.st_nlink == 0;
+}
+
 }  // namespace driftmon

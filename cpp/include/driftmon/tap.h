@@ -31,8 +31,17 @@ bool tap_init(const char* model_id, const char* bundle_path);
 void tap_update_input(const float* feat, size_t n) noexcept;
 void tap_update_output(const float* out, size_t n) noexcept;
 
-// Optional teardown at serving-process shutdown. Detaches the arena. Safe to
-// call even if tap_init failed or was never called.
+// Maintenance / self-heal. Call periodically from a NON-hot context (e.g. a
+// 1 Hz housekeeping timer). Recovers a degraded tap (worker came up after
+// serving) and re-attaches when the worker rebuilt the arena (bundle update).
+// The tap also self-heals without integration changes: while degraded,
+// tap_update_* triggers this automatically about once per 2^20 calls — never
+// on the healthy hot path. Returns true if the tap is live afterwards.
+bool tap_maintain() noexcept;
+
+// Optional teardown at serving-process shutdown. Unmaps the arena — call only
+// once serving threads are quiesced (no tap_update_* in flight). Safe to call
+// even if tap_init failed or was never called.
 void tap_shutdown() noexcept;
 
 }  // namespace driftmon

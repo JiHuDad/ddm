@@ -160,7 +160,7 @@ if(DRIFTMON_ENABLE_CPP)
   foreach(t test_shm_abi test_bundle test_psi_detector test_warmup_guard
             test_tap_noop test_arena_concurrency test_ks_detector test_detect
             test_multimodel test_fault_isolation test_streaming_detectors
-            test_cpp_export)
+            test_cpp_export test_tap_reconnect)
     add_executable(${t} cpp/tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE driftmon_cpp)
     target_include_directories(${t} PRIVATE cpp/src tests)

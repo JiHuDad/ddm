@@ -1,0 +1,2 @@
+{"model_id":"good_a","window":{"min_samples":50,"max_seconds":60},
+      "features":[{"name":"f","bin_edges":[0,1,2,3,4],"ref_hist":[10,20,30,40]}]}

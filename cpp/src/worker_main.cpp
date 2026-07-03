@@ -30,6 +30,7 @@ driftmon::ExportRecord make_record(driftmon::ModelMonitor& mon,
     r.generation = gen;
     r.max_score = v.max_score;
     r.severity = v.max_score >= 0.2 ? 2 : (v.max_score >= 0.1 ? 1 : 0);
+    r.samples_total = mon.samples_total();
     for (size_t f = 0; f < v.per_feature.size(); ++f) {
         driftmon::ExportFeature ef;
         ef.name = mon.bundle().features[f].name;
@@ -102,15 +103,23 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, on_signal);
 
     // One window clock + export generation counter per model (independent).
+    // last_record holds each model's latest exported state so the heartbeat can
+    // re-publish it with fresh samples_total even when no window closed — the
+    // tap dying silently must be observable off-box (rate(samples_total)==0).
     std::vector<std::chrono::steady_clock::time_point> win_start(
         ws.size(), std::chrono::steady_clock::now());
     std::vector<uint64_t> generation(ws.size(), 0);
+    std::vector<driftmon::ExportRecord> last_record(ws.size());
+    for (size_t i = 0; i < ws.size(); ++i)
+        last_record[i].model_id = ws.at(i).bundle().model_id;
+    auto last_export = std::chrono::steady_clock::now();
+    const auto heartbeat = std::chrono::milliseconds(1000);
 
     while (!g_stop) {
         std::this_thread::sleep_for(std::chrono::milliseconds(period_ms));
         const auto now = std::chrono::steady_clock::now();
         const int64_t ts = static_cast<int64_t>(std::time(nullptr));
-        std::vector<driftmon::ExportRecord> records;
+        bool verdict_this_round = false;
         for (size_t i = 0; i < ws.size(); ++i) {
             const double elapsed = std::chrono::duration<double>(now - win_start[i]).count();
             driftmon::ModelVerdict v = ws.at(i).tick(elapsed);
@@ -119,7 +128,8 @@ int main(int argc, char** argv) {
                 std::printf("model=%s window_samples=%ld max_score=%.4f severity=%d\n",
                             id.c_str(), v.window_samples, v.max_score, v.alarm ? 2 : 0);
                 std::fflush(stdout);
-                records.push_back(make_record(ws.at(i), v, ts, ++generation[i]));
+                last_record[i] = make_record(ws.at(i), v, ts, ++generation[i]);
+                verdict_this_round = true;
                 win_start[i] = std::chrono::steady_clock::now();
             } else if (v.warming_up) {
                 std::fprintf(stderr, "model=%s warming up (window_samples=%ld)\n",
@@ -127,9 +137,16 @@ int main(int argc, char** argv) {
                 win_start[i] = std::chrono::steady_clock::now();
             }
         }
-        // Best-effort export (R5.3): failure logged, loop continues.
-        if (exporter && !records.empty() && !exporter->write(records))
-            std::fprintf(stderr, "export write failed (continuing)\n");
+        // Export on every verdict, plus a heartbeat with fresh liveness counters.
+        if (exporter && (verdict_this_round || now - last_export >= heartbeat)) {
+            for (size_t i = 0; i < ws.size(); ++i) {
+                last_record[i].timestamp = ts;
+                last_record[i].samples_total = ws.at(i).samples_total();
+            }
+            if (!exporter->write(last_record))   // best-effort (R5.3)
+                std::fprintf(stderr, "export write failed (continuing)\n");
+            last_export = now;
+        }
     }
     std::fprintf(stderr, "driftmon worker stopping\n");
     return 0;

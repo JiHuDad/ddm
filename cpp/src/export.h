@@ -30,6 +30,10 @@ struct ExportRecord {
     uint64_t generation = 0;      // monotonically increasing per model
     double   max_score = 0.0;
     int      severity = 0;        // 0 STABLE / 1 WARNING / 2 SIGNIFICANT
+    // Tap-liveness: cumulative samples the worker has drained for this model.
+    // Off-box rule `rate(driftmon_samples_total)==0 while serving` ⇒ the tap
+    // silently degraded to no-op — the failure mode that must never be silent.
+    uint64_t samples_total = 0;
     std::vector<ExportFeature> features;
 };
 

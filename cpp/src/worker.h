@@ -82,6 +82,11 @@ public:
     Arena& arena() { return arena_; }
     const Bundle& bundle() const { return bundle_; }
 
+    // Cumulative samples drained from the tap since this worker started —
+    // never reset by window closes. rate(samples_total)==0 while serving is
+    // live ⇒ the tap is dead/degraded (monitoring-of-the-monitoring).
+    uint64_t samples_total() const { return samples_total_; }
+
     ~ModelMonitor();
 
 private:
@@ -95,6 +100,7 @@ private:
     std::vector<std::vector<std::unique_ptr<Detector>>> detectors_;
     std::vector<Histogram> accum_;   // per-feature accumulated counts this window
     long accum_samples_ = 0;
+    uint64_t samples_total_ = 0;
     bool reused_arena_ = false;
 };
 

@@ -176,6 +176,7 @@ ModelVerdict ModelMonitor::tick(double elapsed_seconds) {
         accum_[f].total = total;
     }
     accum_samples_ += static_cast<long>(n);
+    samples_total_ += n;
 
     switch (window_decision(accum_samples_, elapsed_seconds,
                             bundle_.min_samples, bundle_.max_seconds)) {

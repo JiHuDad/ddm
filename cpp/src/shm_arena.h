@@ -55,6 +55,10 @@ bool arena_open_or_create(Arena& a, const std::string& name, const SlotSpec& spe
 void arena_detach(Arena& a);          // unmap + close (does not unlink)
 void arena_unlink(const std::string& name);  // remove the shm name (owner cleanup)
 
+// True if the mapped shm object has been unlinked (nlink==0), i.e. the worker
+// rebuilt the arena and this mapping is a ghost nobody will ever read.
+bool arena_is_stale(const Arena& a);
+
 // Canonical shm name for a model — tap and worker must agree.
 inline std::string arena_name(const std::string& model_id) {
     return "/driftmon." + model_id;

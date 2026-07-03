@@ -44,14 +44,26 @@ def wait_for(predicate, timeout, interval=0.05):
     return False
 
 
-def read_severity(prom_path):
-    """Return int severity from the export file, or None if not present yet."""
+def read_metric(prom_path, metric):
+    """Return int value of driftmon_<metric>{model=...}, or None if absent."""
     if not os.path.exists(prom_path):
         return None
-    pat = re.compile(r'driftmon_drift_severity\{model="%s"\}\s+(\d+)' % re.escape(MODEL_ID))
+    pat = re.compile(r'driftmon_%s\{model="%s"\}\s+(\d+)' % (metric, re.escape(MODEL_ID)))
     with open(prom_path) as f:
         m = pat.search(f.read())
     return int(m.group(1)) if m else None
+
+
+def read_severity(prom_path):
+    """Severity once a real verdict exists (generation >= 1); None before that.
+
+    The worker also heartbeats records before any window closes (tap-liveness
+    export), so a severity line alone is not proof a verdict happened.
+    """
+    gen = read_metric(prom_path, "generation")
+    if gen is None or gen < 1:
+        return None
+    return read_metric(prom_path, "drift_severity")
 
 
 def run_phase(name, worker_bin, driver_bin, bundle, csv, prom, expect, loops):
