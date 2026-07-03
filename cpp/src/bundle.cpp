@@ -88,6 +88,26 @@ bool parse_quality(dm::JsonParser& jp, Bundle& b) {
     return jp.consume('}');
 }
 
+bool parse_alarm(dm::JsonParser& jp, Bundle& b) {
+    if (!jp.consume('{')) return false;
+    while (!jp.peek('}')) {
+        std::string key;
+        if (!jp.parse_string(key)) return false;
+        if (!jp.consume(':')) return false;
+        if (key == "warn_ratio") {
+            if (!jp.parse_number(b.warn_ratio)) return false;
+        } else if (key == "up_windows") {
+            if (!jp.parse_int(b.up_windows)) return false;
+        } else if (key == "down_windows") {
+            if (!jp.parse_int(b.down_windows)) return false;
+        } else {
+            if (!jp.skip_value()) return false;
+        }
+        if (!jp.consume(',')) break;
+    }
+    return jp.consume('}');
+}
+
 bool parse_sampling(dm::JsonParser& jp, Bundle& b) {
     if (!jp.consume('{')) return false;
     while (!jp.peek('}')) {
@@ -151,6 +171,14 @@ bool validate(const Bundle& b, const std::vector<int>& indices, std::string& err
         err = "sampling.every_n must be > 0 when ring_rows > 0";
         return false;
     }
+    if (b.warn_ratio < 0.0 || b.warn_ratio > 1.0) {
+        err = "alarm.warn_ratio must be in [0, 1]";
+        return false;
+    }
+    if (b.up_windows < 1 || b.down_windows < 1) {
+        err = "alarm.up_windows / down_windows must be >= 1";
+        return false;
+    }
     std::set<int> seen_idx;
     for (size_t i = 0; i < b.features.size(); ++i) {
         const auto& f = b.features[i];
@@ -202,6 +230,7 @@ bool parse_bundle(const std::string& json, Bundle& out, std::string& err) {
         else if (key == "window")         ok = parse_window(jp, b);
         else if (key == "quality")        ok = parse_quality(jp, b);
         else if (key == "sampling")       ok = parse_sampling(jp, b);
+        else if (key == "alarm")          ok = parse_alarm(jp, b);
         else if (key == "tests")          ok = parse_string_array(jp, b.tests);
         else                              ok = jp.skip_value();   // created_at, train_window, mode_tag
         if (!ok) { err = "malformed value for key '" + key + "'"; return false; }

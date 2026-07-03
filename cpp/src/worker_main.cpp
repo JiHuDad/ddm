@@ -29,7 +29,7 @@ driftmon::ExportRecord make_record(driftmon::ModelMonitor& mon,
     r.timestamp = ts;
     r.generation = gen;
     r.max_score = v.max_score;
-    r.severity = v.max_score >= 0.2 ? 2 : (v.max_score >= 0.1 ? 1 : 0);
+    r.severity = v.severity;   // bundle-driven, debounced (P4) — never hardcoded
     r.samples_total = mon.samples_total();
     r.quality_alarm = v.quality_alarm;
     for (size_t f = 0; f < v.per_feature.size(); ++f) {
@@ -158,7 +158,7 @@ int main(int argc, char** argv) {
             const std::string& id = ws.at(i).bundle().model_id;
             if (v.produced) {
                 std::printf("model=%s window_samples=%ld max_score=%.4f severity=%d quality_alarm=%d\n",
-                            id.c_str(), v.window_samples, v.max_score, v.alarm ? 2 : 0,
+                            id.c_str(), v.window_samples, v.max_score, v.severity,
                             v.quality_alarm ? 1 : 0);
                 std::fflush(stdout);
                 last_record[i] = make_record(ws.at(i), v, ts, ++generation[i]);

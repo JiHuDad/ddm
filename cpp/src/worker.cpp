@@ -92,6 +92,20 @@ WindowDecision window_decision(long accumulated_samples, double elapsed_seconds,
     return WindowDecision::Accumulate;
 }
 
+int Debouncer::update(int raw_level) {
+    if (raw_level > reported_) {
+        down_streak_ = 0;
+        if (++up_streak_ >= up_) { reported_ = raw_level; up_streak_ = 0; }
+    } else if (raw_level < reported_) {
+        up_streak_ = 0;
+        if (++down_streak_ >= down_) { reported_ = raw_level; down_streak_ = 0; }
+    } else {
+        up_streak_ = 0;
+        down_streak_ = 0;
+    }
+    return reported_;
+}
+
 uint64_t slot_swap_read(SlotHeader* s, std::vector<Histogram>& out,
                         uint64_t grace_spins) {
     const uint32_t old = s->active_idx.load(std::memory_order_seq_cst);
@@ -144,25 +158,27 @@ bool ModelMonitor::init(const Bundle& b, std::string& err) {
     refs_ = feature_refs_from_bundle(b);   // ref_ratios over physical bins
     detectors_.clear();
     detectors_.resize(refs_.size());       // default-construct (vectors not copyable)
+    debounce_.assign(refs_.size(), Debouncer(b.up_windows, b.down_windows));
     for (size_t f = 0; f < refs_.size(); ++f) {
         for (const std::string& test : b.tests) {
             FeatureRef r = refs_[f];
-            std::unique_ptr<Detector> d;
+            BoundDetector bd;
+            bd.test = test;
             if (test == "psi") {
-                r.threshold = b.features[f].psi_threshold;
-                d = std::make_unique<PsiDetector>();
+                r.threshold = bd.threshold = b.features[f].psi_threshold;
+                bd.d = std::make_unique<PsiDetector>();
             } else if (test == "ks") {
-                r.threshold = b.features[f].ks_threshold;
-                d = std::make_unique<KsDetector>();
+                r.threshold = bd.threshold = b.features[f].ks_threshold;
+                bd.d = std::make_unique<KsDetector>();
             } else if (test == "cusum") {
-                d = std::make_unique<CusumDetector>();   // streaming (R3.4)
+                bd.d = std::make_unique<CusumDetector>();   // streaming (R3.4)
             } else if (test == "adwin") {
-                d = std::make_unique<AdwinDetector>();    // streaming (R3.4)
+                bd.d = std::make_unique<AdwinDetector>();    // streaming (R3.4)
             } else {
                 continue;   // unknown detector name ignored (forward-compat)
             }
-            d->configure(r);
-            detectors_[f].push_back(std::move(d));
+            bd.d->configure(r);
+            detectors_[f].push_back(std::move(bd));
         }
     }
     reset_window();
@@ -183,6 +199,7 @@ ModelVerdict ModelMonitor::evaluate() {
     v.produced = true;
     v.window_samples = accum_samples_;
     v.per_feature.resize(detectors_.size());
+    v.feature_severity.resize(detectors_.size());
     v.quality.resize(detectors_.size());
     for (size_t f = 0; f < detectors_.size(); ++f) {
         const Histogram& full = accum_[f];              // physical: [... overflow, nan]
@@ -196,14 +213,21 @@ ModelVerdict ModelMonitor::evaluate() {
         dist.total = full.total - nan_count;
 
         DriftResult feat;   // worst detector for this feature
+        int raw_level = 0;  // 0/1/2 from each detector's OWN threshold (P4)
         for (auto& det : detectors_[f]) {
-            DriftResult r = det->eval(dist);
+            DriftResult r = det.d->eval(dist);
             if (r.score > feat.score) feat.score = r.score;
             if (r.alarm) feat.alarm = true;
+            int lvl = 0;
+            if (r.alarm) lvl = 2;
+            else if (det.threshold > 0.0 &&
+                     r.score >= bundle_.warn_ratio * det.threshold) lvl = 1;
+            if (lvl > raw_level) raw_level = lvl;
         }
         v.per_feature[f] = feat;
+        v.feature_severity[f] = debounce_[f].update(raw_level);
+        if (v.feature_severity[f] > v.severity) v.severity = v.feature_severity[f];
         if (feat.score > v.max_score) v.max_score = feat.score;
-        if (feat.alarm) v.alarm = true;
 
         // Data-quality signals (v2): pipeline breakage, not drift.
         FeatureQuality& q = v.quality[f];
@@ -228,6 +252,7 @@ ModelVerdict ModelMonitor::evaluate() {
         q.alarm = q.nan_ratio > bundle_.nan_ratio_max || q.constant;
         if (q.alarm) v.quality_alarm = true;
     }
+    v.alarm = (v.severity == 2);   // model alarm is the DEBOUNCED significant level
     v.histograms = accum_;   // snapshot for export (R5.1)
     return v;
 }

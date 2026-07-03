@@ -432,6 +432,19 @@ test_sample_ring/fast:
 .PHONY : test_sample_ring/fast
 
 #=============================================================================
+# Target rules for targets named test_debounce
+
+# Build rule for target.
+test_debounce: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_debounce
+.PHONY : test_debounce
+
+# fast build rule for target.
+test_debounce/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_debounce.dir/build.make CMakeFiles/test_debounce.dir/build
+.PHONY : test_debounce/fast
+
+#=============================================================================
 # Target rules for targets named bench_tap_latency
 
 # Build rule for target.
@@ -865,6 +878,30 @@ cpp/tests/test_cpp_export.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_cpp_export.dir/build.make CMakeFiles/test_cpp_export.dir/cpp/tests/test_cpp_export.cpp.s
 .PHONY : cpp/tests/test_cpp_export.cpp.s
 
+cpp/tests/test_debounce.o: cpp/tests/test_debounce.cpp.o
+.PHONY : cpp/tests/test_debounce.o
+
+# target to build an object file
+cpp/tests/test_debounce.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_debounce.dir/build.make CMakeFiles/test_debounce.dir/cpp/tests/test_debounce.cpp.o
+.PHONY : cpp/tests/test_debounce.cpp.o
+
+cpp/tests/test_debounce.i: cpp/tests/test_debounce.cpp.i
+.PHONY : cpp/tests/test_debounce.i
+
+# target to preprocess a source file
+cpp/tests/test_debounce.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_debounce.dir/build.make CMakeFiles/test_debounce.dir/cpp/tests/test_debounce.cpp.i
+.PHONY : cpp/tests/test_debounce.cpp.i
+
+cpp/tests/test_debounce.s: cpp/tests/test_debounce.cpp.s
+.PHONY : cpp/tests/test_debounce.s
+
+# target to generate assembly for a file
+cpp/tests/test_debounce.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_debounce.dir/build.make CMakeFiles/test_debounce.dir/cpp/tests/test_debounce.cpp.s
+.PHONY : cpp/tests/test_debounce.cpp.s
+
 cpp/tests/test_detect.o: cpp/tests/test_detect.cpp.o
 .PHONY : cpp/tests/test_detect.o
 
@@ -1248,6 +1285,7 @@ help:
 	@echo "... test_arena_concurrency"
 	@echo "... test_bundle"
 	@echo "... test_cpp_export"
+	@echo "... test_debounce"
 	@echo "... test_detect"
 	@echo "... test_fault_isolation"
 	@echo "... test_ks_detector"
@@ -1311,6 +1349,9 @@ help:
 	@echo "... cpp/tests/test_cpp_export.o"
 	@echo "... cpp/tests/test_cpp_export.i"
 	@echo "... cpp/tests/test_cpp_export.s"
+	@echo "... cpp/tests/test_debounce.o"
+	@echo "... cpp/tests/test_debounce.i"
+	@echo "... cpp/tests/test_debounce.s"
 	@echo "... cpp/tests/test_detect.o"
 	@echo "... cpp/tests/test_detect.i"
 	@echo "... cpp/tests/test_detect.s"

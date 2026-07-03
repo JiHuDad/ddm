@@ -45,6 +45,13 @@ struct Bundle {
     // (most-recent wins); the worker dumps it on alarm. ring_rows 0 disables.
     long sample_every = 100;
     long ring_rows = 256;
+    // Alarm policy (optional "alarm" block). warn_ratio: WARNING level at
+    // score >= warn_ratio * threshold. Debounce: a level must hold for
+    // up_windows consecutive verdicts to be reported higher / down_windows to
+    // be reported lower — kills alarm flapping near the threshold.
+    double warn_ratio = 0.5;
+    int up_windows = 1;
+    int down_windows = 2;
     std::vector<std::string> tests;    // active detectors (e.g. "psi", "ks")
     std::vector<BundleFeature> features;  // inputs first, then outputs
 
