@@ -38,9 +38,10 @@ inline void tap_write(const float* v, size_t n, bool outputs) noexcept {
         const float* e    = c->edges_ptr + c->edges_off_ptr[f];
         const uint32_t ne = c->edges_off_ptr[f + 1] - c->edges_off_ptr[f];  // interior+1
         const float x = v[j];
-        if (!(x == x)) continue;                     // NaN: skip (no <cmath>, no throw)
         uint32_t k;                                  // physical bin
-        if (x < e[0]) {
+        if (!(x == x)) {
+            k = ne + 1;                              // NaN bin — data-quality signal (v2)
+        } else if (x < e[0]) {
             k = 0;                                   // underflow (R1.5: no clamp)
         } else if (x >= e[ne - 1]) {
             k = ne;                                  // overflow

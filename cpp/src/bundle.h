@@ -34,6 +34,11 @@ struct Bundle {
     std::string model_id;
     long min_samples = 0;              // window.min_samples (default applied if unset)
     long max_seconds = 0;              // window.max_seconds (default applied if unset)
+    // Data-quality gates (optional "quality" block). NaN influx / a feature
+    // going constant means the PIPELINE broke — flagged separately from drift
+    // so operators don't chase a retrain when the fix is upstream repair.
+    double nan_ratio_max = 0.01;       // quality alarm if NaN share exceeds this
+    double oor_ratio_max = 0.05;       // out-of-range flag (drift-kind input, not quality alarm)
     std::vector<std::string> tests;    // active detectors (e.g. "psi", "ks")
     std::vector<BundleFeature> features;  // inputs first, then outputs
 

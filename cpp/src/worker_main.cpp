@@ -31,11 +31,17 @@ driftmon::ExportRecord make_record(driftmon::ModelMonitor& mon,
     r.max_score = v.max_score;
     r.severity = v.max_score >= 0.2 ? 2 : (v.max_score >= 0.1 ? 1 : 0);
     r.samples_total = mon.samples_total();
+    r.quality_alarm = v.quality_alarm;
     for (size_t f = 0; f < v.per_feature.size(); ++f) {
         driftmon::ExportFeature ef;
         ef.name = mon.bundle().features[f].name;
         ef.score = v.per_feature[f].score;
         ef.alarm = v.per_feature[f].alarm;
+        if (f < v.quality.size()) {
+            ef.nan_ratio = v.quality[f].nan_ratio;
+            ef.oor_ratio = v.quality[f].oor_ratio;
+            ef.quality_alarm = v.quality[f].alarm;
+        }
         if (f < v.histograms.size()) ef.hist = v.histograms[f].counts;
         r.features.push_back(std::move(ef));
     }
@@ -125,8 +131,9 @@ int main(int argc, char** argv) {
             driftmon::ModelVerdict v = ws.at(i).tick(elapsed);
             const std::string& id = ws.at(i).bundle().model_id;
             if (v.produced) {
-                std::printf("model=%s window_samples=%ld max_score=%.4f severity=%d\n",
-                            id.c_str(), v.window_samples, v.max_score, v.alarm ? 2 : 0);
+                std::printf("model=%s window_samples=%ld max_score=%.4f severity=%d quality_alarm=%d\n",
+                            id.c_str(), v.window_samples, v.max_score, v.alarm ? 2 : 0,
+                            v.quality_alarm ? 1 : 0);
                 std::fflush(stdout);
                 last_record[i] = make_record(ws.at(i), v, ts, ++generation[i]);
                 verdict_this_round = true;

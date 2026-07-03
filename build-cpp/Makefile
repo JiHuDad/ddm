@@ -406,6 +406,19 @@ test_tap_reconnect/fast:
 .PHONY : test_tap_reconnect/fast
 
 #=============================================================================
+# Target rules for targets named test_quality
+
+# Build rule for target.
+test_quality: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_quality
+.PHONY : test_quality
+
+# fast build rule for target.
+test_quality/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_quality.dir/build.make CMakeFiles/test_quality.dir/build
+.PHONY : test_quality/fast
+
+#=============================================================================
 # Target rules for targets named bench_tap_latency
 
 # Build rule for target.
@@ -959,6 +972,30 @@ cpp/tests/test_psi_detector.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_psi_detector.dir/build.make CMakeFiles/test_psi_detector.dir/cpp/tests/test_psi_detector.cpp.s
 .PHONY : cpp/tests/test_psi_detector.cpp.s
 
+cpp/tests/test_quality.o: cpp/tests/test_quality.cpp.o
+.PHONY : cpp/tests/test_quality.o
+
+# target to build an object file
+cpp/tests/test_quality.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_quality.dir/build.make CMakeFiles/test_quality.dir/cpp/tests/test_quality.cpp.o
+.PHONY : cpp/tests/test_quality.cpp.o
+
+cpp/tests/test_quality.i: cpp/tests/test_quality.cpp.i
+.PHONY : cpp/tests/test_quality.i
+
+# target to preprocess a source file
+cpp/tests/test_quality.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_quality.dir/build.make CMakeFiles/test_quality.dir/cpp/tests/test_quality.cpp.i
+.PHONY : cpp/tests/test_quality.cpp.i
+
+cpp/tests/test_quality.s: cpp/tests/test_quality.cpp.s
+.PHONY : cpp/tests/test_quality.s
+
+# target to generate assembly for a file
+cpp/tests/test_quality.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_quality.dir/build.make CMakeFiles/test_quality.dir/cpp/tests/test_quality.cpp.s
+.PHONY : cpp/tests/test_quality.cpp.s
+
 cpp/tests/test_shm_abi.o: cpp/tests/test_shm_abi.cpp.o
 .PHONY : cpp/tests/test_shm_abi.o
 
@@ -1179,6 +1216,7 @@ help:
 	@echo "... test_ks_detector"
 	@echo "... test_multimodel"
 	@echo "... test_psi_detector"
+	@echo "... test_quality"
 	@echo "... test_shm_abi"
 	@echo "... test_streaming_detectors"
 	@echo "... test_tap_noop"
@@ -1250,6 +1288,9 @@ help:
 	@echo "... cpp/tests/test_psi_detector.o"
 	@echo "... cpp/tests/test_psi_detector.i"
 	@echo "... cpp/tests/test_psi_detector.s"
+	@echo "... cpp/tests/test_quality.o"
+	@echo "... cpp/tests/test_quality.i"
+	@echo "... cpp/tests/test_quality.s"
 	@echo "... cpp/tests/test_shm_abi.o"
 	@echo "... cpp/tests/test_shm_abi.i"
 	@echo "... cpp/tests/test_shm_abi.s"

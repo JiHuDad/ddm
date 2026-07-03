@@ -22,6 +22,10 @@ struct SlotSpec {
     uint32_t n_features = 0;
     uint32_t n_bins_total = 0;
     std::vector<uint32_t> bin_offset;   // length n_features + 1, prefix sums
+    // v2 sample ring (0 = disabled).
+    uint32_t ring_rows = 0;
+    uint32_t sample_every = 0;
+    uint32_t n_inputs = 0;
 };
 
 struct Arena {

@@ -56,13 +56,26 @@ uint64_t slot_swap_read(SlotHeader* s, std::vector<Histogram>& out,
 
 // --- Per-model monitor -------------------------------------------------------
 
+// Per-feature data-quality signals (v2). Quality ≠ drift: a NaN flood or a
+// feature going constant means the upstream pipeline broke — retraining on
+// such data would be poison, so it is alarmed on a separate channel.
+struct FeatureQuality {
+    double nan_ratio = 0.0;      // NaN share of all samples in the window
+    double oor_ratio = 0.0;      // under+overflow share of non-NaN samples
+    bool   constant = false;     // one bin holds ~everything while the ref was spread
+    bool   out_of_range = false; // oor_ratio exceeded bundle.oor_ratio_max (drift-kind input)
+    bool   alarm = false;        // nan_ratio over threshold OR constant
+};
+
 struct ModelVerdict {
     bool produced = false;       // false while accumulating or warming up
     bool warming_up = false;     // window closed by time but below min_samples
     long window_samples = 0;     // samples in the closed/active window
     double max_score = 0.0;
     bool alarm = false;
+    bool quality_alarm = false;  // any feature's quality alarm (v2)
     std::vector<DriftResult> per_feature;
+    std::vector<FeatureQuality> quality;   // parallel to per_feature (v2)
     std::vector<Histogram> histograms;   // per-feature snapshot at evaluate time (for export)
 };
 

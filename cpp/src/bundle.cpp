@@ -70,6 +70,24 @@ bool parse_feature_array(dm::JsonParser& jp, std::vector<BundleFeature>& feature
     return jp.consume(']');
 }
 
+bool parse_quality(dm::JsonParser& jp, Bundle& b) {
+    if (!jp.consume('{')) return false;
+    while (!jp.peek('}')) {
+        std::string key;
+        if (!jp.parse_string(key)) return false;
+        if (!jp.consume(':')) return false;
+        if (key == "nan_ratio_max") {
+            if (!jp.parse_number(b.nan_ratio_max)) return false;
+        } else if (key == "oor_ratio_max") {
+            if (!jp.parse_number(b.oor_ratio_max)) return false;
+        } else {
+            if (!jp.skip_value()) return false;
+        }
+        if (!jp.consume(',')) break;
+    }
+    return jp.consume('}');
+}
+
 bool parse_window(dm::JsonParser& jp, Bundle& b) {
     if (!jp.consume('{')) return false;
     while (!jp.peek('}')) {
@@ -156,6 +174,7 @@ bool parse_bundle(const std::string& json, Bundle& out, std::string& err) {
         else if (key == "features")       ok = parse_feature_array(jp, b.features, false, in_idx);
         else if (key == "outputs")        ok = parse_feature_array(jp, b.features, true, out_idx);
         else if (key == "window")         ok = parse_window(jp, b);
+        else if (key == "quality")        ok = parse_quality(jp, b);
         else if (key == "tests")          ok = parse_string_array(jp, b.tests);
         else                              ok = jp.skip_value();   // created_at, train_window, mode_tag
         if (!ok) { err = "malformed value for key '" + key + "'"; return false; }

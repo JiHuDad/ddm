@@ -14,7 +14,8 @@ TEST(abi_golden_layout) {
     CHECK(offsetof(SlotHeader, seq) % DRIFTMON_CACHELINE == 0);
     CHECK(std::atomic<uint64_t>::is_always_lock_free);
     CHECK(std::atomic<uint32_t>::is_always_lock_free);
-    CHECK(DRIFTMON_SHM_VERSION == 1);
+    CHECK(DRIFTMON_SHM_VERSION == 2);      // v2: NaN bin + sample ring
+    CHECK(DRIFTMON_EXTRA_BINS == 3);       // underflow + overflow + NaN
 }
 
 TEST(abi_layout_math) {

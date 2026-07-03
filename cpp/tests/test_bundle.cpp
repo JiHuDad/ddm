@@ -40,8 +40,8 @@ TEST(bundle_valid_parse) {
     CHECK(b.features[1].psi_threshold == 0.2);   // default applied
     CHECK(b.min_samples == 500);
     CHECK(b.max_seconds == 30);
-    // physical bins = interior+2 each: (4+2) + (3+2) = 11
-    CHECK(b.n_bins_total() == 11);
+    // physical bins = interior+3 each (under/over/NaN): (4+3) + (3+3) = 13
+    CHECK(b.n_bins_total() == 13);
 }
 
 TEST(bundle_window_defaults) {

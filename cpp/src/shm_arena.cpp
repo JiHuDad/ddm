@@ -34,7 +34,9 @@ bool arena_create(Arena& a, const std::string& name, const SlotSpec& spec,
         return false;
     }
     const std::string nm = shm_name(name);
-    const size_t bytes = arena_bytes(spec.n_bins_total);
+    const uint32_t row_stride =
+        spec.ring_rows ? ring_row_stride_for(spec.n_inputs) : 0;
+    const size_t bytes = arena_bytes(spec.n_bins_total, spec.ring_rows, row_stride);
 
     // Fresh region: unlink any stale one first so size/contents are clean.
     shm_unlink(nm.c_str());
@@ -66,6 +68,17 @@ bool arena_create(Arena& a, const std::string& name, const SlotSpec& spec,
     std::memset(s->bin_offset, 0, sizeof(s->bin_offset));
     for (size_t i = 0; i < spec.bin_offset.size(); ++i)
         s->bin_offset[i] = spec.bin_offset[i];
+    // v2 sample ring: placed after the two histogram buffers.
+    s->ring_rows = spec.ring_rows;
+    s->ring_row_stride = row_stride;
+    s->ring_offset = spec.ring_rows
+        ? static_cast<uint32_t>(slot_header_padded_size() +
+              DRIFTMON_NUM_BUFFERS * bins_stride(spec.n_bins_total) * sizeof(uint64_t))
+        : 0;
+    s->sample_every = spec.sample_every;
+    s->n_inputs = spec.n_inputs;
+    std::memset(s->reserved, 0, sizeof(s->reserved));
+    s->ring_head.store(0, std::memory_order_relaxed);
     s->seq.store(0, std::memory_order_relaxed);
     s->active_idx.store(0, std::memory_order_relaxed);
     for (uint32_t b = 0; b < DRIFTMON_NUM_BUFFERS; ++b) {
@@ -110,7 +123,10 @@ bool arena_attach(Arena& a, const std::string& name,
             err = "n_bins_total mismatch (tap bundle disagrees with worker layout)";
             goto fail;
         }
-        if (bytes < arena_bytes(s->n_bins_total)) { err = "arena smaller than slot layout"; goto fail; }
+        if (bytes < arena_bytes(s->n_bins_total, s->ring_rows, s->ring_row_stride)) {
+            err = "arena smaller than slot layout";
+            goto fail;
+        }
     }
 
     a.fd = fd; a.base = base; a.bytes = bytes; a.name = nm; a.is_owner = false;
@@ -131,7 +147,10 @@ bool arena_open_or_create(Arena& a, const std::string& name, const SlotSpec& spe
     if (arena_attach(probe, name, spec.n_bins_total, perr)) {
         SlotHeader* s = probe.slot(0);
         const bool match = s->n_features == spec.n_features &&
-                           std::string(s->model_id) == spec.model_id;
+                           std::string(s->model_id) == spec.model_id &&
+                           s->ring_rows == spec.ring_rows &&
+                           s->sample_every == spec.sample_every &&
+                           s->n_inputs == spec.n_inputs;
         if (match) {
             probe.is_owner = true;   // we take over ownership (keep tap data intact)
             a = probe;

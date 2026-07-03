@@ -47,8 +47,8 @@ TEST(positive_single_model_accumulation) {
 
     CHECK(tap_init("tapm", kBundlePath));          // now attach succeeds
 
-    // 5 valid samples in [2,3) ⇒ interior physical bin 3; 1 NaN (skipped, but
-    // still counts as a sample); 1 underflow; 1 overflow.
+    // 5 valid samples in [2,3) ⇒ interior physical bin 3; 1 NaN (counted in the
+    // dedicated NaN bin, v2); 1 underflow; 1 overflow.
     float v = 2.5f;
     for (int i = 0; i < 5; ++i) tap_update_input(&v, 1);
     float nan = std::nanf("");
@@ -60,13 +60,14 @@ TEST(positive_single_model_accumulation) {
     std::vector<Histogram> frozen;
     uint64_t samples = slot_swap_read(mon.slot(), frozen);
 
-    CHECK(samples == 8);                           // 8 tap calls (NaN included)
+    CHECK(samples == 8);                           // 8 tap calls
     CHECK(frozen.size() == 1);
-    CHECK(frozen[0].counts.size() == 6);           // underflow + 4 interior + overflow
+    CHECK(frozen[0].counts.size() == 7);           // underflow + 4 interior + overflow + NaN
     CHECK(frozen[0].counts[0] == 1);               // underflow (-1)
     CHECK(frozen[0].counts[3] == 5);               // [2,3) bin (2.5 × 5)
     CHECK(frozen[0].counts[5] == 1);               // overflow (99)
-    CHECK(frozen[0].total == 7);                   // 7 binned (NaN not binned)
+    CHECK(frozen[0].counts[6] == 1);               // NaN bin (v2 quality signal)
+    CHECK(frozen[0].total == 8);                   // all 8 binned somewhere
 
     tap_shutdown();
 }

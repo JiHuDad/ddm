@@ -35,11 +35,12 @@ std::vector<FeatureRef> feature_refs_from_bundle(const Bundle& b) {
         FeatureRef r;
         r.name = f.name;
         r.threshold = f.psi_threshold;
-        // Physical layout: [underflow, interior..., overflow]. Normalize ref_hist
-        // counts to ratios over the interior; underflow/overflow stay 0.
+        // Detectors see DISTRIBUTION bins only: [underflow, interior..., overflow].
+        // The NaN bin (physical index B+2) is a quality signal, deliberately
+        // excluded — a NaN flood must raise the quality alarm, not fake drift.
         long total = 0;
         for (long c : f.ref_hist) total += c;
-        r.ref_ratios.assign(f.interior_bins() + DRIFTMON_EXTRA_BINS, 0.0);
+        r.ref_ratios.assign(f.interior_bins() + 2, 0.0);
         if (total > 0) {
             const double denom = static_cast<double>(total);
             for (size_t k = 0; k < f.ref_hist.size(); ++k)
@@ -138,8 +139,10 @@ bool ModelMonitor::init(const Bundle& b, std::string& err) {
 void ModelMonitor::reset_window() {
     accum_samples_ = 0;
     accum_.assign(refs_.size(), Histogram{});
+    // Accumulate over the FULL physical layout (incl. the NaN bin).
     for (size_t f = 0; f < refs_.size(); ++f)
-        accum_[f].counts.assign(refs_[f].ref_ratios.size(), 0);
+        accum_[f].counts.assign(
+            bundle_.features[f].interior_bins() + DRIFTMON_EXTRA_BINS, 0);
 }
 
 ModelVerdict ModelMonitor::evaluate() {
@@ -147,16 +150,50 @@ ModelVerdict ModelMonitor::evaluate() {
     v.produced = true;
     v.window_samples = accum_samples_;
     v.per_feature.resize(detectors_.size());
+    v.quality.resize(detectors_.size());
     for (size_t f = 0; f < detectors_.size(); ++f) {
+        const Histogram& full = accum_[f];              // physical: [... overflow, nan]
+        const uint64_t nan_count = full.counts.empty() ? 0 : full.counts.back();
+
+        // Distribution view for detectors: NaN bin stripped, total adjusted.
+        Histogram dist;
+        dist.counts.assign(full.counts.begin(),
+                           full.counts.empty() ? full.counts.end()
+                                               : full.counts.end() - 1);
+        dist.total = full.total - nan_count;
+
         DriftResult feat;   // worst detector for this feature
         for (auto& det : detectors_[f]) {
-            DriftResult r = det->eval(accum_[f]);
+            DriftResult r = det->eval(dist);
             if (r.score > feat.score) feat.score = r.score;
             if (r.alarm) feat.alarm = true;
         }
         v.per_feature[f] = feat;
         if (feat.score > v.max_score) v.max_score = feat.score;
         if (feat.alarm) v.alarm = true;
+
+        // Data-quality signals (v2): pipeline breakage, not drift.
+        FeatureQuality& q = v.quality[f];
+        if (full.total > 0)
+            q.nan_ratio = static_cast<double>(nan_count) /
+                          static_cast<double>(full.total);
+        if (dist.total > 0) {
+            const uint64_t oor = dist.counts.front() +
+                                 (dist.counts.size() > 1 ? dist.counts.back() : 0);
+            q.oor_ratio = static_cast<double>(oor) / static_cast<double>(dist.total);
+            // Constant feature: everything lands in one bin while the reference
+            // was spread — upstream likely feeding a stuck/default value.
+            uint64_t max_bin = 0;
+            for (uint64_t c : dist.counts) if (c > max_bin) max_bin = c;
+            double ref_max = 0.0;
+            for (double r : refs_[f].ref_ratios) if (r > ref_max) ref_max = r;
+            q.constant =
+                static_cast<double>(max_bin) / static_cast<double>(dist.total) >= 0.99 &&
+                ref_max <= 0.9;
+        }
+        q.out_of_range = q.oor_ratio > bundle_.oor_ratio_max;
+        q.alarm = q.nan_ratio > bundle_.nan_ratio_max || q.constant;
+        if (q.alarm) v.quality_alarm = true;
     }
     v.histograms = accum_;   // snapshot for export (R5.1)
     return v;
