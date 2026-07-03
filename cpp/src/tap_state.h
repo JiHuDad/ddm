@@ -45,6 +45,7 @@ struct TapState {
     std::atomic<SlotHeader*> slot{nullptr};
     std::atomic<TapConfig*>  cfg{nullptr};    // leaked on replace (bounded)
     std::atomic<uint32_t>    noop_calls{0};   // degraded-mode auto-retry counter
+    std::atomic<uint64_t>    sample_ctr{0};   // 1-in-N systematic sampling counter
 
     // --- cold-side only ---
     Arena arena;                      // current mapping; stale ones stay mapped (leaked)

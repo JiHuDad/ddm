@@ -47,6 +47,31 @@ driftmon::ExportRecord make_record(driftmon::ModelMonitor& mon,
     }
     return r;
 }
+
+// Dump the sample ring as CSV retraining material on alarm (R-R1). One file
+// per verdict generation; best-effort like all export paths.
+void dump_samples(driftmon::ModelMonitor& mon, const std::string& dir, uint64_t gen) {
+    auto rows = driftmon::read_ring(mon.slot());
+    if (rows.empty()) return;
+    std::string path = dir + "/driftmon_" + mon.bundle().model_id +
+                       "_gen" + std::to_string(gen) + "_samples.csv";
+    std::FILE* f = std::fopen(path.c_str(), "w");
+    if (!f) { std::fprintf(stderr, "sample dump failed: %s\n", path.c_str()); return; }
+    bool first = true;
+    for (const auto& feat : mon.bundle().features) {
+        if (feat.is_output) continue;
+        std::fprintf(f, "%s%s", first ? "" : ",", feat.name.c_str());
+        first = false;
+    }
+    std::fprintf(f, "\n");
+    for (const auto& row : rows) {
+        for (size_t j = 0; j < row.size(); ++j)
+            std::fprintf(f, "%s%.9g", j ? "," : "", static_cast<double>(row[j]));
+        std::fprintf(f, "\n");
+    }
+    std::fclose(f);
+    std::fprintf(stderr, "dumped %zu sampled input vectors → %s\n", rows.size(), path.c_str());
+}
 }  // namespace
 
 namespace {
@@ -56,7 +81,7 @@ void on_signal(int) { g_stop = 1; }
 
 int main(int argc, char** argv) {
     std::vector<std::string> bundles;
-    std::string bundle_dir, export_kind, export_target, cpu_list;
+    std::string bundle_dir, export_kind, export_target, cpu_list, sample_dir;
     int period_ms = 100;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--bundle") == 0 && i + 1 < argc) bundles.push_back(argv[++i]);
@@ -64,6 +89,7 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "--period-ms") == 0 && i + 1 < argc) period_ms = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--export") == 0 && i + 1 < argc) export_kind = argv[++i];
         else if (std::strcmp(argv[i], "--export-target") == 0 && i + 1 < argc) export_target = argv[++i];
+        else if (std::strcmp(argv[i], "--sample-dir") == 0 && i + 1 < argc) sample_dir = argv[++i];
         else if (std::strcmp(argv[i], "--cpu") == 0 && i + 1 < argc) cpu_list = argv[++i];
         else { std::fprintf(stderr, "unknown arg: %s\n", argv[i]); return 2; }
     }
@@ -71,7 +97,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr,
             "usage: %s (--bundle <path>)... | --bundle-dir <dir>\n"
             "          [--period-ms <n>] [--export prometheus|file --export-target <path>]\n"
-            "          [--cpu <list e.g. 2,3>]\n", argv[0]);
+            "          [--sample-dir <dir>] [--cpu <list e.g. 2,3>]\n", argv[0]);
         return 2;
     }
 
@@ -137,6 +163,9 @@ int main(int argc, char** argv) {
                 std::fflush(stdout);
                 last_record[i] = make_record(ws.at(i), v, ts, ++generation[i]);
                 verdict_this_round = true;
+                // Alarm ⇒ dump raw sampled inputs as retraining material.
+                if ((v.alarm || v.quality_alarm) && !sample_dir.empty())
+                    dump_samples(ws.at(i), sample_dir, generation[i]);
                 win_start[i] = std::chrono::steady_clock::now();
             } else if (v.warming_up) {
                 std::fprintf(stderr, "model=%s warming up (window_samples=%ld)\n",

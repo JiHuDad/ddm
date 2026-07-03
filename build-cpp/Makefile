@@ -419,6 +419,19 @@ test_quality/fast:
 .PHONY : test_quality/fast
 
 #=============================================================================
+# Target rules for targets named test_sample_ring
+
+# Build rule for target.
+test_sample_ring: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_sample_ring
+.PHONY : test_sample_ring
+
+# fast build rule for target.
+test_sample_ring/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_sample_ring.dir/build.make CMakeFiles/test_sample_ring.dir/build
+.PHONY : test_sample_ring/fast
+
+#=============================================================================
 # Target rules for targets named bench_tap_latency
 
 # Build rule for target.
@@ -996,6 +1009,30 @@ cpp/tests/test_quality.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_quality.dir/build.make CMakeFiles/test_quality.dir/cpp/tests/test_quality.cpp.s
 .PHONY : cpp/tests/test_quality.cpp.s
 
+cpp/tests/test_sample_ring.o: cpp/tests/test_sample_ring.cpp.o
+.PHONY : cpp/tests/test_sample_ring.o
+
+# target to build an object file
+cpp/tests/test_sample_ring.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_sample_ring.dir/build.make CMakeFiles/test_sample_ring.dir/cpp/tests/test_sample_ring.cpp.o
+.PHONY : cpp/tests/test_sample_ring.cpp.o
+
+cpp/tests/test_sample_ring.i: cpp/tests/test_sample_ring.cpp.i
+.PHONY : cpp/tests/test_sample_ring.i
+
+# target to preprocess a source file
+cpp/tests/test_sample_ring.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_sample_ring.dir/build.make CMakeFiles/test_sample_ring.dir/cpp/tests/test_sample_ring.cpp.i
+.PHONY : cpp/tests/test_sample_ring.cpp.i
+
+cpp/tests/test_sample_ring.s: cpp/tests/test_sample_ring.cpp.s
+.PHONY : cpp/tests/test_sample_ring.s
+
+# target to generate assembly for a file
+cpp/tests/test_sample_ring.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_sample_ring.dir/build.make CMakeFiles/test_sample_ring.dir/cpp/tests/test_sample_ring.cpp.s
+.PHONY : cpp/tests/test_sample_ring.cpp.s
+
 cpp/tests/test_shm_abi.o: cpp/tests/test_shm_abi.cpp.o
 .PHONY : cpp/tests/test_shm_abi.o
 
@@ -1217,6 +1254,7 @@ help:
 	@echo "... test_multimodel"
 	@echo "... test_psi_detector"
 	@echo "... test_quality"
+	@echo "... test_sample_ring"
 	@echo "... test_shm_abi"
 	@echo "... test_streaming_detectors"
 	@echo "... test_tap_noop"
@@ -1291,6 +1329,9 @@ help:
 	@echo "... cpp/tests/test_quality.o"
 	@echo "... cpp/tests/test_quality.i"
 	@echo "... cpp/tests/test_quality.s"
+	@echo "... cpp/tests/test_sample_ring.o"
+	@echo "... cpp/tests/test_sample_ring.i"
+	@echo "... cpp/tests/test_sample_ring.s"
 	@echo "... cpp/tests/test_shm_abi.o"
 	@echo "... cpp/tests/test_shm_abi.i"
 	@echo "... cpp/tests/test_shm_abi.s"

@@ -54,6 +54,12 @@ WindowDecision window_decision(long accumulated_samples, double elapsed_seconds,
 uint64_t slot_swap_read(SlotHeader* s, std::vector<Histogram>& out,
                         uint64_t grace_spins = 0);
 
+// Snapshot the sample ring (v2): the most recent sampled raw INPUT vectors,
+// oldest-first. Torn / in-progress rows are skipped. This is the retraining
+// material a drift alarm gets dumped with (R-R1) — histograms alone cannot
+// reconstruct training data.
+std::vector<std::vector<float>> read_ring(SlotHeader* s);
+
 // --- Per-model monitor -------------------------------------------------------
 
 // Per-feature data-quality signals (v2). Quality ≠ drift: a NaN flood or a

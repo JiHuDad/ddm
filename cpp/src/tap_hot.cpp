@@ -57,6 +57,29 @@ inline void tap_write(const float* v, size_t n, bool outputs) noexcept {
     }
     s->sample_count[idx].fetch_add(1, std::memory_order_relaxed);
     writer_release(s, idx);
+
+    // Sample ring (v2, R-R1): keep 1 in sample_every complete INPUT vectors as
+    // retraining material. Per selected row: one fetch_add + n_inputs atomic
+    // stores — amortized to ~nothing at 1/N. Row protocol is a mini-seqlock
+    // (odd=in progress, even=complete); the worker skips torn/odd rows. Floats
+    // are stored as atomic u32 bits so individual values can never tear.
+    if (!outputs && s->ring_rows != 0 && s->sample_every != 0 && n >= c->n_inputs) {
+        const uint64_t sc = t.sample_ctr.fetch_add(1, std::memory_order_relaxed);
+        if (sc % s->sample_every == 0) {
+            const uint64_t k = s->ring_head.fetch_add(1, std::memory_order_relaxed);
+            const uint32_t row = static_cast<uint32_t>(k % s->ring_rows);
+            std::atomic<uint64_t>* rowseq = ring_rowseq(s, row);
+            auto* dst = reinterpret_cast<std::atomic<uint32_t>*>(ring_rowdata(s, row));
+            rowseq->store(2 * k + 1, std::memory_order_relaxed);   // odd: in progress
+            std::atomic_thread_fence(std::memory_order_release);
+            for (uint32_t j = 0; j < c->n_inputs; ++j) {
+                uint32_t bits;
+                __builtin_memcpy(&bits, &v[j], sizeof(bits));      // bit-cast, no libc call
+                dst[j].store(bits, std::memory_order_relaxed);
+            }
+            rowseq->store(2 * k + 2, std::memory_order_release);   // even: complete
+        }
+    }
 }
 
 }  // namespace

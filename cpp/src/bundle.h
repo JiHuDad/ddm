@@ -39,6 +39,12 @@ struct Bundle {
     // so operators don't chase a retrain when the fix is upstream repair.
     double nan_ratio_max = 0.01;       // quality alarm if NaN share exceeds this
     double oor_ratio_max = 0.05;       // out-of-range flag (drift-kind input, not quality alarm)
+    // Sample ring (optional "sampling" block): preserve raw INPUT vectors as
+    // retraining material — histograms cannot reconstruct training data. The
+    // tap keeps 1 in every_n input vectors in a shm ring of ring_rows rows
+    // (most-recent wins); the worker dumps it on alarm. ring_rows 0 disables.
+    long sample_every = 100;
+    long ring_rows = 256;
     std::vector<std::string> tests;    // active detectors (e.g. "psi", "ks")
     std::vector<BundleFeature> features;  // inputs first, then outputs
 

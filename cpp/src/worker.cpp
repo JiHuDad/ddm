@@ -25,7 +25,40 @@ SlotSpec slot_spec_from_bundle(const Bundle& b) {
     }
     spec.bin_offset[spec.n_features] = acc;
     spec.n_bins_total = acc;
+    // v2 sample ring: input vectors only.
+    uint32_t n_inputs = 0;
+    for (const auto& f : b.features) if (!f.is_output) ++n_inputs;
+    spec.n_inputs = n_inputs;
+    spec.ring_rows = n_inputs > 0 ? static_cast<uint32_t>(b.ring_rows) : 0;
+    spec.sample_every = static_cast<uint32_t>(b.sample_every);
     return spec;
+}
+
+std::vector<std::vector<float>> read_ring(SlotHeader* s) {
+    std::vector<std::vector<float>> rows;
+    if (s->ring_rows == 0 || s->n_inputs == 0) return rows;
+    const uint64_t head = s->ring_head.load(std::memory_order_acquire);
+    const uint64_t avail = head < s->ring_rows ? head : s->ring_rows;
+    rows.reserve(avail);
+    // Oldest-first over the last `avail` claims; skip torn/in-progress rows.
+    for (uint64_t k = head - avail; k < head; ++k) {
+        const uint32_t row = static_cast<uint32_t>(k % s->ring_rows);
+        std::atomic<uint64_t>* rowseq = ring_rowseq(s, row);
+        const uint64_t s1 = rowseq->load(std::memory_order_acquire);
+        if (s1 & 1) continue;                        // writer mid-copy
+        std::vector<float> vals(s->n_inputs);
+        auto* src = reinterpret_cast<std::atomic<uint32_t>*>(ring_rowdata(s, row));
+        for (uint32_t j = 0; j < s->n_inputs; ++j) {
+            const uint32_t bits = src[j].load(std::memory_order_relaxed);
+            float f;
+            __builtin_memcpy(&f, &bits, sizeof(f));
+            vals[j] = f;
+        }
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (rowseq->load(std::memory_order_relaxed) != s1) continue;  // overwritten mid-read
+        rows.push_back(std::move(vals));
+    }
+    return rows;
 }
 
 std::vector<FeatureRef> feature_refs_from_bundle(const Bundle& b) {

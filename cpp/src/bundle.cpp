@@ -88,6 +88,24 @@ bool parse_quality(dm::JsonParser& jp, Bundle& b) {
     return jp.consume('}');
 }
 
+bool parse_sampling(dm::JsonParser& jp, Bundle& b) {
+    if (!jp.consume('{')) return false;
+    while (!jp.peek('}')) {
+        std::string key;
+        if (!jp.parse_string(key)) return false;
+        if (!jp.consume(':')) return false;
+        if (key == "every_n") {
+            int v; if (!jp.parse_int(v)) return false; b.sample_every = v;
+        } else if (key == "ring_rows") {
+            int v; if (!jp.parse_int(v)) return false; b.ring_rows = v;
+        } else {
+            if (!jp.skip_value()) return false;
+        }
+        if (!jp.consume(',')) break;
+    }
+    return jp.consume('}');
+}
+
 bool parse_window(dm::JsonParser& jp, Bundle& b) {
     if (!jp.consume('{')) return false;
     while (!jp.peek('}')) {
@@ -123,6 +141,14 @@ bool validate(const Bundle& b, const std::vector<int>& indices, std::string& err
     if (b.features.empty())  { err = "no features (and no outputs) in bundle"; return false; }
     if (b.features.size() > DRIFTMON_MAX_FEATURES) {
         err = "too many features (max " + std::to_string(DRIFTMON_MAX_FEATURES) + ")";
+        return false;
+    }
+    if (b.sample_every < 0 || b.ring_rows < 0) {
+        err = "sampling.every_n / ring_rows must be >= 0";
+        return false;
+    }
+    if (b.ring_rows > 0 && b.sample_every == 0) {
+        err = "sampling.every_n must be > 0 when ring_rows > 0";
         return false;
     }
     std::set<int> seen_idx;
@@ -175,6 +201,7 @@ bool parse_bundle(const std::string& json, Bundle& out, std::string& err) {
         else if (key == "outputs")        ok = parse_feature_array(jp, b.features, true, out_idx);
         else if (key == "window")         ok = parse_window(jp, b);
         else if (key == "quality")        ok = parse_quality(jp, b);
+        else if (key == "sampling")       ok = parse_sampling(jp, b);
         else if (key == "tests")          ok = parse_string_array(jp, b.tests);
         else                              ok = jp.skip_value();   // created_at, train_window, mode_tag
         if (!ok) { err = "malformed value for key '" + key + "'"; return false; }
