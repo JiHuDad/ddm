@@ -71,7 +71,9 @@
         200
       ],
       "psi_threshold": 0.2
-    },
+    }
+  ],
+  "outputs": [
     {
       "name": "strongest_angle",
       "dtype": "float32",

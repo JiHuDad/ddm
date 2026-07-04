@@ -39,6 +39,9 @@ struct ExportRecord {
     // silently degraded to no-op — the failure mode that must never be silent.
     uint64_t samples_total = 0;
     bool quality_alarm = false;   // any feature's pipeline-quality alarm (v2)
+    // Change-kind classification (R2): "none" | "data_quality" | "out_of_range"
+    // | "abrupt" | "sustained" | "distribution" — routes the off-box response.
+    std::string kind = "none";
     std::vector<ExportFeature> features;
 };
 

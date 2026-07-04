@@ -60,5 +60,6 @@ driftmon_drift_score_max{model="deepmimo"} 13.8452
 driftmon_drift_severity{model="deepmimo"} 2
 driftmon_generation{model="deepmimo"} 1
 driftmon_model_quality_alarm{model="deepmimo"} 0
-driftmon_samples_total{model="deepmimo"} 2000
-driftmon_export_timestamp{model="deepmimo"} 1783094582
+driftmon_drift_kind{model="deepmimo",kind="out_of_range"} 1
+driftmon_samples_total{model="deepmimo"} 4000
+driftmon_export_timestamp{model="deepmimo"} 1783125150

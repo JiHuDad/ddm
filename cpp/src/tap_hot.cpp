@@ -17,10 +17,9 @@ namespace {
 
 // Increment the histogram for `count` consecutive features starting at global
 // feature index `fbase`, reading values v[0..n). O(1) per element.
-inline void tap_write(const float* v, size_t n, bool outputs) noexcept {
-    detail::TapState& t = detail::g_tap;
+inline void tap_write(detail::TapState& t, const float* v, size_t n, bool outputs) noexcept {
     if (!t.live.load(std::memory_order_acquire)) {
-        detail::tap_noop_tick();                     // degraded: rate-limited self-heal
+        detail::tap_noop_tick(t);                    // degraded: rate-limited self-heal
         return;
     }
     const detail::TapConfig* c = t.cfg.load(std::memory_order_acquire);
@@ -86,12 +85,22 @@ inline void tap_write(const float* v, size_t n, bool outputs) noexcept {
 
 void tap_update_input(const float* feat, size_t n) noexcept {
     if (feat == nullptr) return;
-    tap_write(feat, n, /*outputs=*/false);
+    tap_write(detail::g_tap, feat, n, /*outputs=*/false);
 }
 
 void tap_update_output(const float* out, size_t n) noexcept {
     if (out == nullptr) return;
-    tap_write(out, n, /*outputs=*/true);
+    tap_write(detail::g_tap, out, n, /*outputs=*/true);
+}
+
+void tap_input(TapHandle* h, const float* feat, size_t n) noexcept {
+    if (h == nullptr || feat == nullptr) return;
+    tap_write(*h, feat, n, /*outputs=*/false);
+}
+
+void tap_output(TapHandle* h, const float* out, size_t n) noexcept {
+    if (h == nullptr || out == nullptr) return;
+    tap_write(*h, out, n, /*outputs=*/true);
 }
 
 }  // namespace driftmon

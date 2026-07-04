@@ -66,16 +66,44 @@ def read_severity(prom_path):
     return read_metric(prom_path, "drift_severity")
 
 
-def run_phase(name, worker_bin, driver_bin, bundle, csv, prom, expect, loops):
+def read_kind(prom_path):
+    """Return the drift-kind label from the export, or None."""
+    if not os.path.exists(prom_path):
+        return None
+    pat = re.compile(
+        r'driftmon_drift_kind\{model="%s",kind="(\w+)"\}\s+1' % re.escape(MODEL_ID))
+    with open(prom_path) as f:
+        m = pat.search(f.read())
+    return m.group(1) if m else None
+
+
+def read_feature_alarm(prom_path, feature):
+    """Return 0/1 alarm state of one feature, or None."""
+    if not os.path.exists(prom_path):
+        return None
+    pat = re.compile(
+        r'driftmon_drift_alarm\{model="%s",feature="%s"\}\s+(\d+)'
+        % (re.escape(MODEL_ID), re.escape(feature)))
+    with open(prom_path) as f:
+        m = pat.search(f.read())
+    return int(m.group(1)) if m else None
+
+
+def run_phase(name, worker_bin, driver_bin, bundle, csv, prom, expect, loops,
+              sample_dir, expect_kind=None, expect_output_alarm=None,
+              expect_samples=False):
     print(f"\n=== Phase {name}: replay {os.path.basename(csv)} (expect severity {expect}) ===")
     if os.path.exists(SHM_PATH):
         os.remove(SHM_PATH)
     if os.path.exists(prom):
         os.remove(prom)
+    for old in os.listdir(sample_dir):
+        if old.startswith(f"driftmon_{MODEL_ID}_gen") and old.endswith("_samples.csv"):
+            os.remove(os.path.join(sample_dir, old))
 
     worker = subprocess.Popen(
         [worker_bin, "--bundle", bundle, "--export", "prometheus",
-         "--export-target", prom, "--period-ms", "50"],
+         "--export-target", prom, "--sample-dir", sample_dir, "--period-ms", "50"],
         stderr=subprocess.PIPE, text=True)
     try:
         # Worker creates the shm arena on startup.
@@ -90,9 +118,37 @@ def run_phase(name, worker_bin, driver_bin, bundle, csv, prom, expect, loops):
         if not wait_for(lambda: read_severity(prom) is not None, timeout=10.0):
             print("  FAIL: worker produced no verdict (no export)")
             return False
+
+        ok = True
         sev = read_severity(prom)
-        ok = (sev == expect)
-        print(f"  exported severity = {sev}  ({'PASS' if ok else 'FAIL'}, expected {expect})")
+        if sev != expect:
+            ok = False
+        print(f"  exported severity = {sev}  ({'PASS' if sev == expect else 'FAIL'}, expected {expect})")
+
+        if expect_kind is not None:
+            kind = read_kind(prom)
+            if kind != expect_kind:
+                ok = False
+            print(f"  drift kind = {kind}  ({'PASS' if kind == expect_kind else 'FAIL'}, expected {expect_kind})")
+
+        if expect_output_alarm is not None:
+            oa = read_feature_alarm(prom, "strongest_angle")
+            if oa != expect_output_alarm:
+                ok = False
+            print(f"  output-feature alarm = {oa}  "
+                  f"({'PASS' if oa == expect_output_alarm else 'FAIL'}, expected {expect_output_alarm})")
+
+        if expect_samples:
+            dumps = [p for p in os.listdir(sample_dir)
+                     if p.startswith(f"driftmon_{MODEL_ID}_gen") and p.endswith("_samples.csv")]
+            n_rows = 0
+            if dumps:
+                with open(os.path.join(sample_dir, dumps[0])) as fh:
+                    n_rows = max(0, sum(1 for _ in fh) - 1)   # minus header
+            if not dumps or n_rows < 1:
+                ok = False
+            print(f"  retraining sample dump = {dumps[0] if dumps else 'MISSING'} "
+                  f"({n_rows} rows)  ({'PASS' if dumps and n_rows >= 1 else 'FAIL'})")
         return ok
     finally:
         worker.terminate()
@@ -125,21 +181,29 @@ def main(argv=None):
     print("=== Step 1: generate DeepMIMO-like zones ===")
     run([sys.executable, GEN_ZONES, "--out-dir", work, "--n-train", "2000", "--n-test", "1000"])
 
-    # 2. Build the reference bundle from Zone A training data.
+    # 2. Build the reference bundle from Zone A training data. strongest_angle
+    #    plays the MODEL OUTPUT so the demo covers output-drift tapping too.
     print("\n=== Step 2: make reference bundle from Zone A ===")
     bundle = os.path.join(work, "bundle.json")
     run([sys.executable, MAKE_BUNDLE, "--input", os.path.join(work, "zone_a_train.csv"),
+         "--features", "rsrp", "main_path_delay", "--outputs", "strongest_angle",
          "--model-id", MODEL_ID, "--buckets", "10",
          "--min-samples", "400", "--max-seconds", "3600",
          "--tests", "psi", "ks", "--output", bundle])
 
-    # 3+4+5. Two phases, fresh worker each.
+    # 3+4+5. Two phases, fresh worker each. Zone E's rsrp shifts far below the
+    # Zone A bin range, so the expected classification is "out_of_range"; the
+    # drifted output (strongest_angle 45°→120°) must alarm as well; the alarm
+    # must leave a raw-sample CSV (retraining material).
     a_ok = run_phase("A (stable)", worker_bin, driver_bin, bundle,
                      os.path.join(work, "zone_a_test.csv"),
-                     os.path.join(work, "a.prom"), expect=0, loops=2)
+                     os.path.join(work, "a.prom"), expect=0, loops=2,
+                     sample_dir=work, expect_kind="none", expect_output_alarm=0)
     e_ok = run_phase("E (drift)", worker_bin, driver_bin, bundle,
                      os.path.join(work, "zone_e_test.csv"),
-                     os.path.join(work, "e.prom"), expect=2, loops=2)
+                     os.path.join(work, "e.prom"), expect=2, loops=2,
+                     sample_dir=work, expect_kind="out_of_range",
+                     expect_output_alarm=1, expect_samples=True)
 
     print("\n==============================")
     print(f"Phase A (STABLE)      : {'PASS' if a_ok else 'FAIL'}")

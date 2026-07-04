@@ -1,14 +1,15 @@
 // tap_init.cpp — driftmon-cpp tap COLD PATH (setup / maintenance / teardown).
 //
-// Owns the g_tap storage and does all file I/O / allocation / syscalls. The hot
-// path (tap_hot.cpp) only reads the atomics this publishes.
+// Owns tap storage (the default tap + all opened handles) and does all file
+// I/O / allocation / syscalls. The hot path (tap_hot.cpp) only reads the
+// atomics this publishes.
 //
-// Self-heal (A1): tap_maintain() recovers a degraded tap (worker came up after
+// Self-heal (A1): maintenance recovers a degraded tap (worker came up after
 // serving) and re-attaches when the worker rebuilt the arena (bundle update —
 // detected via arena_is_stale). It is also invoked automatically from the hot
-// path while degraded, rate-limited by g_tap_retry_calls, so monitoring comes
-// back without any integration change. All cold operations are serialized by a
-// mutex; the hot path never takes it.
+// path while a tap is degraded, rate-limited by g_tap_retry_calls, so
+// monitoring comes back without any integration change. All cold operations
+// are serialized by one mutex; the hot path never takes it.
 //
 // Reconfiguration safety: hot threads may be inside tap_write while we
 // reconfigure. We therefore (a) flip `live` to false before touching anything,
@@ -20,8 +21,10 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "bundle.h"
 #include "shm_arena.h"
@@ -30,12 +33,13 @@
 namespace driftmon {
 namespace detail {
 
-TapState g_tap;                          // storage (kept out of the hot TU)
+TapState g_tap;                          // default (single-model API) tap
 uint32_t g_tap_retry_calls = 1u << 20;   // degraded auto-retry interval (calls)
 
 namespace {
 
-std::mutex g_maintain_mu;                // serializes init/maintain/shutdown
+std::mutex g_maintain_mu;                // serializes init/open/maintain/close
+std::vector<TapHandle*> g_handles;       // opened multi-model handles
 
 // Build an immutable TapConfig from a validated bundle. Heap-allocated so it
 // can be atomically published and safely abandoned (never freed) on replace.
@@ -67,44 +71,57 @@ TapConfig* build_config(const Bundle& b) {
 
 // Abandon the current mapping without munmap (in-flight writers may still be
 // inside it); close the fd so descriptors don't accumulate.
-void abandon_arena_locked() {
-    if (g_tap.arena.fd >= 0) ::close(g_tap.arena.fd);
-    g_tap.arena = Arena{};   // mapping intentionally leaked (bounded)
+void abandon_arena_locked(TapState& t) {
+    if (t.arena.fd >= 0) ::close(t.arena.fd);
+    t.arena = Arena{};   // mapping intentionally leaked (bounded)
 }
 
-// Full (re)initialization from g_tap.model_id / bundle_path. Caller holds the
-// maintenance mutex. Returns true if the tap ends up live.
-bool reinit_locked() {
-    g_tap.live.store(false, std::memory_order_release);   // degrade during swap
+// Full (re)initialization of one tap from its stored model_id / bundle_path.
+// Caller holds the maintenance mutex. Returns true if the tap ends up live.
+bool reinit_locked(TapState& t) {
+    t.live.store(false, std::memory_order_release);   // degrade during swap
 
     Bundle b;
     std::string err;
-    if (!load_bundle(g_tap.bundle_path, b, err)) return false;   // R4.2 gate → no-op
-    if (b.model_id != g_tap.model_id) return false;              // bundle/serving mismatch
+    if (!load_bundle(t.bundle_path, b, err)) return false;   // R4.2 gate → no-op
+    if (b.model_id != t.model_id) return false;              // bundle/serving mismatch
 
     Arena fresh;
     const uint32_t n_bins_total = static_cast<uint32_t>(b.n_bins_total());
     if (!arena_attach(fresh, arena_name(b.model_id), n_bins_total, err))
-        return false;                                            // R1.4 → stay no-op
+        return false;                                        // R1.4 → stay no-op
 
-    abandon_arena_locked();
-    g_tap.arena = fresh;
+    abandon_arena_locked(t);
+    t.arena = fresh;
 
-    TapConfig* cfg = build_config(b);                            // old cfg abandoned
-    g_tap.cfg.store(cfg, std::memory_order_release);
-    g_tap.slot.store(g_tap.arena.slot(0), std::memory_order_release);
-    g_tap.live.store(true, std::memory_order_release);
+    TapConfig* cfg = build_config(b);                        // old cfg abandoned
+    t.cfg.store(cfg, std::memory_order_release);
+    t.slot.store(t.arena.slot(0), std::memory_order_release);
+    t.live.store(true, std::memory_order_release);
     return true;
+}
+
+// Maintain one tap: healthy ⇒ no-op; degraded or stale ⇒ full re-init.
+bool maintain_one_locked(TapState& t) {
+    if (t.bundle_path.empty()) return false;   // never initialized
+    if (t.live.load(std::memory_order_acquire) && !arena_is_stale(t.arena))
+        return true;
+    return reinit_locked(t);
 }
 
 }  // namespace
 
-void tap_noop_tick() noexcept {
-    // Degraded-mode self-heal: about once every g_tap_retry_calls no-op calls,
-    // one caller pays for a recovery attempt. Exact-match on the counter so
-    // concurrent threads elect a single retrier.
-    const uint32_t n = g_tap.noop_calls.fetch_add(1, std::memory_order_relaxed) + 1;
-    if (n % g_tap_retry_calls == 0) (void)tap_maintain();
+void tap_noop_tick(TapState& t) noexcept {
+    // Degraded-mode self-heal: about once every g_tap_retry_calls no-op calls
+    // on this tap, one caller pays for a recovery attempt.
+    const uint32_t n = t.noop_calls.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n % g_tap_retry_calls != 0) return;
+    try {
+        std::lock_guard<std::mutex> lk(g_maintain_mu);
+        maintain_one_locked(t);
+    } catch (...) {
+        // stay degraded; never throw into the serving path
+    }
 }
 
 }  // namespace detail
@@ -114,17 +131,44 @@ bool tap_init(const char* model_id, const char* bundle_path) {
     std::lock_guard<std::mutex> lk(detail::g_maintain_mu);
     detail::g_tap.model_id = model_id;
     detail::g_tap.bundle_path = bundle_path;
-    return detail::reinit_locked();
+    return detail::reinit_locked(detail::g_tap);
+}
+
+TapHandle* tap_open(const char* model_id, const char* bundle_path) {
+    if (model_id == nullptr || bundle_path == nullptr) return nullptr;
+    auto* h = new TapHandle();
+    h->model_id = model_id;
+    h->bundle_path = bundle_path;
+    std::lock_guard<std::mutex> lk(detail::g_maintain_mu);
+    detail::reinit_locked(*h);   // may fail — handle stays no-op and self-heals
+    detail::g_handles.push_back(h);
+    return h;
+}
+
+void tap_close(TapHandle* h) noexcept {
+    if (h == nullptr) return;
+    std::lock_guard<std::mutex> lk(detail::g_maintain_mu);
+    detail::g_handles.erase(
+        std::remove(detail::g_handles.begin(), detail::g_handles.end(), h),
+        detail::g_handles.end());
+    h->live.store(false, std::memory_order_release);
+    if (h->arena.valid()) arena_detach(h->arena);
+    delete h;   // caller contract: no in-flight tap_input/tap_output on h
 }
 
 bool tap_maintain() noexcept {
     try {
         std::lock_guard<std::mutex> lk(detail::g_maintain_mu);
-        if (detail::g_tap.bundle_path.empty()) return false;   // never initialized
-        if (detail::g_tap.live.load(std::memory_order_acquire) &&
-            !arena_is_stale(detail::g_tap.arena))
-            return true;                                       // healthy — nothing to do
-        return detail::reinit_locked();                        // degraded or stale
+        bool any = false, all = true;
+        if (!detail::g_tap.bundle_path.empty()) {
+            any = true;
+            all &= detail::maintain_one_locked(detail::g_tap);
+        }
+        for (TapHandle* h : detail::g_handles) {
+            any = true;
+            all &= detail::maintain_one_locked(*h);
+        }
+        return any && all;
     } catch (...) {
         return false;   // allocation failure etc. — stay degraded, never throw
     }
@@ -137,6 +181,7 @@ void tap_shutdown() noexcept {
     detail::g_tap.live.store(false, std::memory_order_release);
     detail::g_tap.slot.store(nullptr, std::memory_order_release);
     if (detail::g_tap.arena.valid()) arena_detach(detail::g_tap.arena);
+    detail::g_tap.bundle_path.clear();
     // cfg intentionally not freed (a late reader may still hold it).
 }
 

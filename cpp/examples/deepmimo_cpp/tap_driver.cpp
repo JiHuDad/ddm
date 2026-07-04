@@ -54,9 +54,9 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "bundle load failed: %s\n", err.c_str());
         return 1;
     }
-    std::vector<std::string> inputs;
+    std::vector<std::string> inputs, outputs;
     for (const auto& f : b.features)
-        if (!f.is_output) inputs.push_back(f.name);
+        (f.is_output ? outputs : inputs).push_back(f.name);
 
     // Attach the tap (worker must be up). Failure ⇒ no-op mode ⇒ demo fails.
     if (!driftmon::tap_init(b.model_id.c_str(), bundle_path.c_str())) {
@@ -71,42 +71,58 @@ int main(int argc, char** argv) {
     if (!std::getline(f, header)) { std::fprintf(stderr, "empty csv\n"); return 1; }
     const std::vector<std::string> cols = split_csv(header);
 
-    // Map each input feature to its CSV column index.
-    std::vector<int> col_of(inputs.size(), -1);
-    for (size_t k = 0; k < inputs.size(); ++k)
-        for (size_t c = 0; c < cols.size(); ++c)
-            if (cols[c] == inputs[k]) { col_of[k] = static_cast<int>(c); break; }
-    for (size_t k = 0; k < inputs.size(); ++k)
-        if (col_of[k] < 0) {
-            std::fprintf(stderr, "csv missing input column '%s'\n", inputs[k].c_str());
-            driftmon::tap_shutdown();
-            return 1;
-        }
+    // Map input AND output feature names to their CSV column indices.
+    auto map_columns = [&](const std::vector<std::string>& names,
+                           std::vector<int>& col_of) -> bool {
+        col_of.assign(names.size(), -1);
+        for (size_t k = 0; k < names.size(); ++k)
+            for (size_t c = 0; c < cols.size(); ++c)
+                if (cols[c] == names[k]) { col_of[k] = static_cast<int>(c); break; }
+        for (size_t k = 0; k < names.size(); ++k)
+            if (col_of[k] < 0) {
+                std::fprintf(stderr, "csv missing column '%s'\n", names[k].c_str());
+                return false;
+            }
+        return true;
+    };
+    std::vector<int> in_col, out_col;
+    if (!map_columns(inputs, in_col) || !map_columns(outputs, out_col)) {
+        driftmon::tap_shutdown();
+        return 1;
+    }
 
     // Read all rows once, then replay `loops` times (to exceed min_samples).
-    std::vector<std::vector<float>> rows;
+    struct Row { std::vector<float> in, out; };
+    std::vector<Row> rows;
     std::string line;
     while (std::getline(f, line)) {
         if (line.empty()) continue;
         const std::vector<std::string> cells = split_csv(line);
-        std::vector<float> feats(inputs.size());
+        Row row;
+        row.in.resize(inputs.size());
+        row.out.resize(outputs.size());
         bool ok = true;
-        for (size_t k = 0; k < inputs.size(); ++k) {
-            try { feats[k] = std::stof(cells.at(col_of[k])); }
-            catch (...) { ok = false; break; }
-        }
-        if (ok) rows.push_back(std::move(feats));
+        try {
+            for (size_t k = 0; k < inputs.size(); ++k)
+                row.in[k] = std::stof(cells.at(in_col[k]));
+            for (size_t k = 0; k < outputs.size(); ++k)
+                row.out[k] = std::stof(cells.at(out_col[k]));
+        } catch (...) { ok = false; }
+        if (ok) rows.push_back(std::move(row));
     }
 
+    // Feed like a serving loop would: input before Run(), output after.
     long fed = 0;
     for (int l = 0; l < loops; ++l)
         for (const auto& r : rows) {
-            driftmon::tap_update_input(r.data(), r.size());
+            driftmon::tap_update_input(r.in.data(), r.in.size());
+            if (!r.out.empty())
+                driftmon::tap_update_output(r.out.data(), r.out.size());
             ++fed;
         }
 
     driftmon::tap_shutdown();
-    std::fprintf(stderr, "tap_driver: fed %ld samples (model=%s) from %s\n",
-                 fed, b.model_id.c_str(), csv_path.c_str());
+    std::fprintf(stderr, "tap_driver: fed %ld samples (%zu in / %zu out cols, model=%s) from %s\n",
+                 fed, inputs.size(), outputs.size(), b.model_id.c_str(), csv_path.c_str());
     return 0;
 }

@@ -74,6 +74,7 @@ TEST(nan_flood_raises_quality_not_drift) {
     CHECK_NEAR(v.quality[0].nan_ratio, 0.2, 1e-9);
     CHECK(!v.alarm);                           // distribution itself matches ⇒ NO drift
     CHECK(v.max_score < 0.1);                  // NaN mass excluded from PSI/KS
+    CHECK(v.kind == "data_quality");           // R2: fix the pipeline, don't retrain
 }
 
 TEST(constant_feature_detected) {

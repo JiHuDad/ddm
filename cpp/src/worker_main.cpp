@@ -32,6 +32,7 @@ driftmon::ExportRecord make_record(driftmon::ModelMonitor& mon,
     r.severity = v.severity;   // bundle-driven, debounced (P4) — never hardcoded
     r.samples_total = mon.samples_total();
     r.quality_alarm = v.quality_alarm;
+    r.kind = v.kind;
     for (size_t f = 0; f < v.per_feature.size(); ++f) {
         driftmon::ExportFeature ef;
         ef.name = mon.bundle().features[f].name;
@@ -157,9 +158,9 @@ int main(int argc, char** argv) {
             driftmon::ModelVerdict v = ws.at(i).tick(elapsed);
             const std::string& id = ws.at(i).bundle().model_id;
             if (v.produced) {
-                std::printf("model=%s window_samples=%ld max_score=%.4f severity=%d quality_alarm=%d\n",
+                std::printf("model=%s window_samples=%ld max_score=%.4f severity=%d kind=%s quality_alarm=%d\n",
                             id.c_str(), v.window_samples, v.max_score, v.severity,
-                            v.quality_alarm ? 1 : 0);
+                            v.kind.c_str(), v.quality_alarm ? 1 : 0);
                 std::fflush(stdout);
                 last_record[i] = make_record(ws.at(i), v, ts, ++generation[i]);
                 verdict_this_round = true;

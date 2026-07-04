@@ -57,16 +57,20 @@ struct TapState {
 extern TapState g_tap;
 
 // Degraded-mode auto-retry interval, in tap_update_* calls. Default 1<<20;
-// tests may lower it. A retry is a full tap_maintain() (syscalls) — it only
+// tests may lower it. A retry is a full maintenance pass (syscalls) — it only
 // ever runs while the tap is a no-op, so serving latency is unaffected when
 // monitoring is healthy.
 extern uint32_t g_tap_retry_calls;
 
-// Defined in tap_init.cpp; called by the hot TU while degraded. Rate-limits
-// itself via g_tap.noop_calls and invokes tap_maintain() when due.
-void tap_noop_tick() noexcept;
+// Defined in tap_init.cpp; called by the hot TU while a tap is degraded.
+// Rate-limits itself via t.noop_calls and re-initializes that tap when due.
+void tap_noop_tick(TapState& t) noexcept;
 
 }  // namespace detail
+
+// Opaque public handle (declared in driftmon/tap.h) = one per-model tap state.
+struct TapHandle : detail::TapState {};
+
 }  // namespace driftmon
 
 #endif  // DRIFTMON_TAP_STATE_H

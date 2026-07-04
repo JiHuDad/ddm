@@ -72,26 +72,31 @@ def read_csv(path, feature_names):
     return data
 
 
-def build_bundle(feature_data, feature_names, num_buckets, model_id,
-                 min_samples, max_seconds, tests):
-    features = []
-    for idx, name in enumerate(feature_names):
+def build_bundle(feature_data, feature_names, output_names, num_buckets,
+                 model_id, min_samples, max_seconds, tests):
+    def entry(name, idx):
         edges, counts = compute_feature(feature_data[name], num_buckets)
-        features.append({
+        return {
             "name": name,
             "dtype": "float32",
             "index": idx,
             "bin_edges": edges,
             "ref_hist": counts,
             "psi_threshold": 0.2,
-        })
-    return {
+        }
+
+    features = [entry(n, i) for i, n in enumerate(feature_names)]
+    outputs = [entry(n, len(feature_names) + i) for i, n in enumerate(output_names)]
+    bundle = {
         "schema_version": "1.0",
         "model_id": model_id,
         "window": {"min_samples": min_samples, "max_seconds": max_seconds},
         "tests": tests,
         "features": features,
     }
+    if outputs:
+        bundle["outputs"] = outputs
+    return bundle
 
 
 def main(argv=None):
@@ -99,7 +104,9 @@ def main(argv=None):
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--input", "-i", required=True, metavar="CSV")
     p.add_argument("--features", "-f", nargs="+", metavar="NAME",
-                   help="feature columns (default: all header columns)")
+                   help="input feature columns (default: all header columns)")
+    p.add_argument("--outputs", nargs="+", default=[], metavar="NAME",
+                   help="columns treated as MODEL OUTPUTS (baseline for output drift)")
     p.add_argument("--model-id", required=True)
     p.add_argument("--buckets", "-b", type=int, default=10)
     p.add_argument("--min-samples", type=int, default=1000)
@@ -110,22 +117,25 @@ def main(argv=None):
 
     if args.features is None:
         with open(args.input, newline="") as f:
-            args.features = [c.strip() for c in next(csv.reader(f)) if c.strip()]
+            cols = [c.strip() for c in next(csv.reader(f)) if c.strip()]
+        args.features = [c for c in cols if c not in args.outputs]
         if not args.features:
-            sys.exit(f"error: no columns in header of {args.input}")
+            sys.exit(f"error: no input columns in header of {args.input}")
 
-    data = read_csv(args.input, args.features)
-    bundle = build_bundle(data, args.features, args.buckets, args.model_id,
-                          args.min_samples, args.max_seconds, args.tests)
+    data = read_csv(args.input, args.features + args.outputs)
+    bundle = build_bundle(data, args.features, args.outputs, args.buckets,
+                          args.model_id, args.min_samples, args.max_seconds,
+                          args.tests)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(bundle, f, indent=2, ensure_ascii=False)
         f.write("\n")
 
     print(f"Written bundle: {args.output}  model_id={args.model_id}")
-    for feat in bundle["features"]:
-        lo, hi = feat["bin_edges"][0], feat["bin_edges"][-1]
-        print(f"  {feat['name']}: edges=[{lo:.4g} .. {hi:.4g}]  "
-              f"ref_hist sum={sum(feat['ref_hist'])}")
+    for kind in ("features", "outputs"):
+        for feat in bundle.get(kind, []):
+            lo, hi = feat["bin_edges"][0], feat["bin_edges"][-1]
+            print(f"  {kind[:-1]} {feat['name']}: edges=[{lo:.4g} .. {hi:.4g}]  "
+                  f"ref_hist sum={sum(feat['ref_hist'])}")
     return 0
 
 

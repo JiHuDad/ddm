@@ -35,6 +35,8 @@ std::string to_prometheus_text(const std::vector<ExportRecord>& recs) {
         o << "driftmon_generation{model=\"" << r.model_id << "\"} " << r.generation << "\n";
         o << "driftmon_model_quality_alarm{model=\"" << r.model_id << "\"} "
           << (r.quality_alarm ? 1 : 0) << "\n";
+        o << "driftmon_drift_kind{model=\"" << r.model_id << "\",kind=\""
+          << r.kind << "\"} 1\n";
         o << "driftmon_samples_total{model=\"" << r.model_id << "\"} " << r.samples_total << "\n";
         o << "driftmon_export_timestamp{model=\"" << r.model_id << "\"} " << r.timestamp << "\n";
     }
@@ -46,6 +48,7 @@ std::string to_json(const ExportRecord& r) {
     o << "{\"model_id\":\"" << r.model_id << "\",\"timestamp\":" << r.timestamp
       << ",\"generation\":" << r.generation << ",\"max_score\":" << r.max_score
       << ",\"severity\":" << r.severity
+      << ",\"kind\":\"" << r.kind << "\""
       << ",\"samples_total\":" << r.samples_total << ",\"features\":[";
     for (size_t i = 0; i < r.features.size(); ++i) {
         const auto& f = r.features[i];

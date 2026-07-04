@@ -445,6 +445,19 @@ test_debounce/fast:
 .PHONY : test_debounce/fast
 
 #=============================================================================
+# Target rules for targets named test_tap_handles
+
+# Build rule for target.
+test_tap_handles: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_tap_handles
+.PHONY : test_tap_handles
+
+# fast build rule for target.
+test_tap_handles/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_tap_handles.dir/build.make CMakeFiles/test_tap_handles.dir/build
+.PHONY : test_tap_handles/fast
+
+#=============================================================================
 # Target rules for targets named bench_tap_latency
 
 # Build rule for target.
@@ -1118,6 +1131,30 @@ cpp/tests/test_streaming_detectors.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_streaming_detectors.dir/build.make CMakeFiles/test_streaming_detectors.dir/cpp/tests/test_streaming_detectors.cpp.s
 .PHONY : cpp/tests/test_streaming_detectors.cpp.s
 
+cpp/tests/test_tap_handles.o: cpp/tests/test_tap_handles.cpp.o
+.PHONY : cpp/tests/test_tap_handles.o
+
+# target to build an object file
+cpp/tests/test_tap_handles.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_tap_handles.dir/build.make CMakeFiles/test_tap_handles.dir/cpp/tests/test_tap_handles.cpp.o
+.PHONY : cpp/tests/test_tap_handles.cpp.o
+
+cpp/tests/test_tap_handles.i: cpp/tests/test_tap_handles.cpp.i
+.PHONY : cpp/tests/test_tap_handles.i
+
+# target to preprocess a source file
+cpp/tests/test_tap_handles.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_tap_handles.dir/build.make CMakeFiles/test_tap_handles.dir/cpp/tests/test_tap_handles.cpp.i
+.PHONY : cpp/tests/test_tap_handles.cpp.i
+
+cpp/tests/test_tap_handles.s: cpp/tests/test_tap_handles.cpp.s
+.PHONY : cpp/tests/test_tap_handles.s
+
+# target to generate assembly for a file
+cpp/tests/test_tap_handles.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_tap_handles.dir/build.make CMakeFiles/test_tap_handles.dir/cpp/tests/test_tap_handles.cpp.s
+.PHONY : cpp/tests/test_tap_handles.cpp.s
+
 cpp/tests/test_tap_noop.o: cpp/tests/test_tap_noop.cpp.o
 .PHONY : cpp/tests/test_tap_noop.o
 
@@ -1295,6 +1332,7 @@ help:
 	@echo "... test_sample_ring"
 	@echo "... test_shm_abi"
 	@echo "... test_streaming_detectors"
+	@echo "... test_tap_handles"
 	@echo "... test_tap_noop"
 	@echo "... test_tap_reconnect"
 	@echo "... test_warmup_guard"
@@ -1379,6 +1417,9 @@ help:
 	@echo "... cpp/tests/test_streaming_detectors.o"
 	@echo "... cpp/tests/test_streaming_detectors.i"
 	@echo "... cpp/tests/test_streaming_detectors.s"
+	@echo "... cpp/tests/test_tap_handles.o"
+	@echo "... cpp/tests/test_tap_handles.i"
+	@echo "... cpp/tests/test_tap_handles.s"
 	@echo "... cpp/tests/test_tap_noop.o"
 	@echo "... cpp/tests/test_tap_noop.i"
 	@echo "... cpp/tests/test_tap_noop.s"

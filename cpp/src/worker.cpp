@@ -2,6 +2,7 @@
 #include "worker.h"
 
 #include <atomic>
+#include <set>
 #include <thread>
 
 #include <dirent.h>
@@ -201,6 +202,8 @@ ModelVerdict ModelMonitor::evaluate() {
     v.per_feature.resize(detectors_.size());
     v.feature_severity.resize(detectors_.size());
     v.quality.resize(detectors_.size());
+    std::set<std::string> alarmed_tests;   // which detector kinds fired (R2)
+    bool any_out_of_range_alarm = false;
     for (size_t f = 0; f < detectors_.size(); ++f) {
         const Histogram& full = accum_[f];              // physical: [... overflow, nan]
         const uint64_t nan_count = full.counts.empty() ? 0 : full.counts.back();
@@ -217,7 +220,10 @@ ModelVerdict ModelMonitor::evaluate() {
         for (auto& det : detectors_[f]) {
             DriftResult r = det.d->eval(dist);
             if (r.score > feat.score) feat.score = r.score;
-            if (r.alarm) feat.alarm = true;
+            if (r.alarm) {
+                feat.alarm = true;
+                alarmed_tests.insert(det.test);   // feeds drift-kind (R2)
+            }
             int lvl = 0;
             if (r.alarm) lvl = 2;
             else if (det.threshold > 0.0 &&
@@ -251,8 +257,20 @@ ModelVerdict ModelMonitor::evaluate() {
         q.out_of_range = q.oor_ratio > bundle_.oor_ratio_max;
         q.alarm = q.nan_ratio > bundle_.nan_ratio_max || q.constant;
         if (q.alarm) v.quality_alarm = true;
+        if (q.out_of_range && feat.alarm) any_out_of_range_alarm = true;
     }
     v.alarm = (v.severity == 2);   // model alarm is the DEBOUNCED significant level
+
+    // Classify the change kind (R2) — precedence: broken pipeline beats drift
+    // explanations; regime escape beats shape analysis; the streaming shape
+    // (abrupt vs sustained) beats the generic distribution verdict.
+    if (v.quality_alarm)                          v.kind = "data_quality";
+    else if (!v.alarm)                            v.kind = "none";
+    else if (any_out_of_range_alarm)              v.kind = "out_of_range";
+    else if (alarmed_tests.count("adwin"))        v.kind = "abrupt";
+    else if (alarmed_tests.count("cusum"))        v.kind = "sustained";
+    else                                          v.kind = "distribution";
+
     v.histograms = accum_;   // snapshot for export (R5.1)
     return v;
 }

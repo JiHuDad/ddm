@@ -161,7 +161,7 @@ if(DRIFTMON_ENABLE_CPP)
             test_tap_noop test_arena_concurrency test_ks_detector test_detect
             test_multimodel test_fault_isolation test_streaming_detectors
             test_cpp_export test_tap_reconnect test_quality test_sample_ring
-            test_debounce)
+            test_debounce test_tap_handles)
     add_executable(${t} cpp/tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE driftmon_cpp)
     target_include_directories(${t} PRIVATE cpp/src tests)

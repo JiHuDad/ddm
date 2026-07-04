@@ -102,6 +102,14 @@ struct ModelVerdict {
     int severity = 0;
     bool alarm = false;          // == (severity == 2)
     bool quality_alarm = false;  // any feature's quality alarm (v2)
+    // What KIND of change fired (R2) — routes the off-box response:
+    //   "data_quality" → fix the pipeline; retraining on this data is poison
+    //   "out_of_range" → new regime beyond the edges; retrain AND re-bin
+    //   "abrupt"       → step change (ADWIN); investigate cause, full retrain
+    //   "sustained"    → gradual trend (CUSUM); fine-tuning candidate
+    //   "distribution" → shape shift within range (PSI/KS); retrain candidate
+    //   "none"         → no alarm
+    std::string kind = "none";
     std::vector<DriftResult> per_feature;
     std::vector<int> feature_severity;     // debounced, parallel to per_feature
     std::vector<FeatureQuality> quality;   // parallel to per_feature (v2)
