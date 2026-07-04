@@ -19,6 +19,12 @@ std::string to_prometheus_text(const std::vector<ExportRecord>& recs) {
               << "\",feature=\"" << f.name << "\"} " << f.score << "\n";
             o << "driftmon_drift_alarm{model=\"" << r.model_id
               << "\",feature=\"" << f.name << "\"} " << (f.alarm ? 1 : 0) << "\n";
+            o << "driftmon_nan_ratio{model=\"" << r.model_id
+              << "\",feature=\"" << f.name << "\"} " << f.nan_ratio << "\n";
+            o << "driftmon_oor_ratio{model=\"" << r.model_id
+              << "\",feature=\"" << f.name << "\"} " << f.oor_ratio << "\n";
+            o << "driftmon_quality_alarm{model=\"" << r.model_id
+              << "\",feature=\"" << f.name << "\"} " << (f.quality_alarm ? 1 : 0) << "\n";
             for (size_t k = 0; k < f.hist.size(); ++k)
                 o << "driftmon_window_hist{model=\"" << r.model_id
                   << "\",feature=\"" << f.name << "\",bin=\"" << k << "\"} "
@@ -27,6 +33,11 @@ std::string to_prometheus_text(const std::vector<ExportRecord>& recs) {
         o << "driftmon_drift_score_max{model=\"" << r.model_id << "\"} " << r.max_score << "\n";
         o << "driftmon_drift_severity{model=\"" << r.model_id << "\"} " << r.severity << "\n";
         o << "driftmon_generation{model=\"" << r.model_id << "\"} " << r.generation << "\n";
+        o << "driftmon_model_quality_alarm{model=\"" << r.model_id << "\"} "
+          << (r.quality_alarm ? 1 : 0) << "\n";
+        o << "driftmon_drift_kind{model=\"" << r.model_id << "\",kind=\""
+          << r.kind << "\"} 1\n";
+        o << "driftmon_samples_total{model=\"" << r.model_id << "\"} " << r.samples_total << "\n";
         o << "driftmon_export_timestamp{model=\"" << r.model_id << "\"} " << r.timestamp << "\n";
     }
     return o.str();
@@ -36,12 +47,18 @@ std::string to_json(const ExportRecord& r) {
     std::ostringstream o;
     o << "{\"model_id\":\"" << r.model_id << "\",\"timestamp\":" << r.timestamp
       << ",\"generation\":" << r.generation << ",\"max_score\":" << r.max_score
-      << ",\"severity\":" << r.severity << ",\"features\":[";
+      << ",\"severity\":" << r.severity
+      << ",\"kind\":\"" << r.kind << "\""
+      << ",\"samples_total\":" << r.samples_total << ",\"features\":[";
     for (size_t i = 0; i < r.features.size(); ++i) {
         const auto& f = r.features[i];
         if (i) o << ",";
         o << "{\"name\":\"" << f.name << "\",\"score\":" << f.score
-          << ",\"alarm\":" << (f.alarm ? "true" : "false") << ",\"hist\":[";
+          << ",\"alarm\":" << (f.alarm ? "true" : "false")
+          << ",\"nan_ratio\":" << f.nan_ratio
+          << ",\"oor_ratio\":" << f.oor_ratio
+          << ",\"quality_alarm\":" << (f.quality_alarm ? "true" : "false")
+          << ",\"hist\":[";
         for (size_t k = 0; k < f.hist.size(); ++k) { if (k) o << ","; o << f.hist[k]; }
         o << "]}";
     }

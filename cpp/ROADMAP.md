@@ -4,16 +4,21 @@
 시작할 수 있도록 남은 작업과 진입점을 정리한다. 코어 PSI 라이브러리(`../SPEC.md`)는 별개로
 완료 상태다.
 
-## 현재 상태 (2026-06-28)
+## 현재 상태 (2026-07-04)
 
 - **Phase 1·2·3 완료 → SPEC-cpp AC1~AC10 전부 충족.**
+- **보강 라운드(P1~P5, [REVIEW.md](REVIEW.md)) 완료** — SPEC-cpp §14 결정 로그 참고:
+  탭 자기치유+생존 export(P1) / ABI v2: NaN bin+품질 채널(P2) / 샘플 링: raw 입력
+  보존+알람 덤프(P3) / severity 번들화+디바운스(P4) / 다모델 TapHandle+출력 E2E+
+  drift_kind 분류(P5).
 - 코드: `cpp/` 트리, `DRIFTMON_ENABLE_CPP=ON`(기본 OFF, 에어갭). 빌드:
   ```sh
   cmake -S . -B build -DDRIFTMON_ENABLE_CPP=ON && cmake --build build
-  ctest --test-dir build --output-on-failure   # cpp 13 테스트 + tap_symbol_audit
+  ctest --test-dir build --output-on-failure   # cpp 18 테스트 + audit + E2E
   ```
 - 동결 헤더 `include/driftmon.h` 불변. shm ABI(`cpp/include/driftmon/shm_abi.h`)는
-  `DRIFTMON_SHM_VERSION=1`. 탭 hot-path는 `nm` 심볼 audit로 malloc/lock/throw/syscall 부재 보장.
+  `DRIFTMON_SHM_VERSION=2`(NaN bin + 샘플 링). 탭 hot-path는 `nm` 심볼 audit로
+  malloc/lock/throw/syscall 부재 보장 (p50 ~72ns).
 
 ### 컴포넌트 지도
 
@@ -33,9 +38,10 @@
 > **모델 의존성 메타데이터 슬롯만 예약(귀속 로직은 미구현).** 현재 모델 간 의존성이 없어
 > 단순 병렬 처리로 충분하나, 향후 "한 모델 출력이 다른 모델 입력" 구조가 생기면 귀속이 필요.
 
-- [ ] **shm ABI 확장:** `SlotHeader`에 의존성 메타데이터 필드 예약(예: `uint32_t
-      upstream_slot[K]` + count). 레이아웃 변경이므로 `DRIFTMON_SHM_VERSION=2`로 bump하고
-      `test_shm_abi`의 golden sizeof 갱신. **귀속 로직은 넣지 않음** — 필드만 예약.
+- [ ] **shm ABI 확장:** `SlotHeader`에 의존성 메타데이터 필드 추가(예: `uint32_t
+      upstream_slot[K]` + count). v2의 `reserved[7]`을 소모하면 sizeof 불변으로 가능하나
+      의미 변경이므로 `DRIFTMON_SHM_VERSION=3`으로 bump + `test_shm_abi` 갱신.
+      **귀속 로직은 넣지 않음** — 필드만 예약.
 - [ ] **번들 스키마:** optional `depends_on: [model_id...]` 파싱(검증만, 동작 없음).
 - [ ] **문서:** SPEC-cpp §9 Phase 4 항목 + 결정 로그에 "예약만, 미구현" 명시.
 
@@ -58,6 +64,15 @@
    바꾸면 더 원칙적. 진입점: `ks_detector.cpp` + 번들에 유의수준 필드.
 6. **벤치 확장.** `bench_tap_latency`(탭) 외에 worker swap-read 처리량·다writer 스케일 벤치.
 7. **RT 검증 (SPEC §10 Q4).** isolcpus/SCHED_FIFO 실노드에서 NFR1·NFR3 실측. 배포 환경 의존.
+8. **다변량/상관 드리프트 (REVIEW A5).** 단변량 히스토그램은 피처 간 상관 붕괴를 못 본다.
+   핵심 피처쌍 2~3개의 coarse 2D 히스토그램(예: 8×8) 슬롯 추가 — v2 `reserved[]` 활용 가능.
+   전체 다변량은 off-box 몫. 진입점: `shm_abi.h`, `worker.cpp`.
+9. **번들 hot-reload (REVIEW R4).** 번들 갱신 시 worker 재기동 없이 arena 재생성 + 탭은
+   자기치유(P1)로 자동 재연결 — worker 쪽 reload 신호(SIGHUP/inotify)만 남음. 재학습 루프의
+   "모델↔번들 버전 원자적 교체"와 연동. 진입점: `worker_main.cpp`, `bundle.h`(`model_version`).
+10. **예측 신뢰도 채널 (REVIEW ②).** 분류 모델의 softmax 최대값/엔트로피 분포를 출력 피처
+    하나로 탭 — 라벨 없이 concept drift를 근사하는 가장 싼 지표. 코드 변경 없이 번들
+    `outputs`에 confidence 항목 추가로 가능(운영 패턴) — 예제/문서화만 남음.
 
 ## 미해결 질문 (SPEC §10 — 합의 필요, 코드 비블로킹)
 

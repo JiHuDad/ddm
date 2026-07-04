@@ -29,16 +29,49 @@ driftmon::ExportRecord make_record(driftmon::ModelMonitor& mon,
     r.timestamp = ts;
     r.generation = gen;
     r.max_score = v.max_score;
-    r.severity = v.max_score >= 0.2 ? 2 : (v.max_score >= 0.1 ? 1 : 0);
+    r.severity = v.severity;   // bundle-driven, debounced (P4) — never hardcoded
+    r.samples_total = mon.samples_total();
+    r.quality_alarm = v.quality_alarm;
+    r.kind = v.kind;
     for (size_t f = 0; f < v.per_feature.size(); ++f) {
         driftmon::ExportFeature ef;
         ef.name = mon.bundle().features[f].name;
         ef.score = v.per_feature[f].score;
         ef.alarm = v.per_feature[f].alarm;
+        if (f < v.quality.size()) {
+            ef.nan_ratio = v.quality[f].nan_ratio;
+            ef.oor_ratio = v.quality[f].oor_ratio;
+            ef.quality_alarm = v.quality[f].alarm;
+        }
         if (f < v.histograms.size()) ef.hist = v.histograms[f].counts;
         r.features.push_back(std::move(ef));
     }
     return r;
+}
+
+// Dump the sample ring as CSV retraining material on alarm (R-R1). One file
+// per verdict generation; best-effort like all export paths.
+void dump_samples(driftmon::ModelMonitor& mon, const std::string& dir, uint64_t gen) {
+    auto rows = driftmon::read_ring(mon.slot());
+    if (rows.empty()) return;
+    std::string path = dir + "/driftmon_" + mon.bundle().model_id +
+                       "_gen" + std::to_string(gen) + "_samples.csv";
+    std::FILE* f = std::fopen(path.c_str(), "w");
+    if (!f) { std::fprintf(stderr, "sample dump failed: %s\n", path.c_str()); return; }
+    bool first = true;
+    for (const auto& feat : mon.bundle().features) {
+        if (feat.is_output) continue;
+        std::fprintf(f, "%s%s", first ? "" : ",", feat.name.c_str());
+        first = false;
+    }
+    std::fprintf(f, "\n");
+    for (const auto& row : rows) {
+        for (size_t j = 0; j < row.size(); ++j)
+            std::fprintf(f, "%s%.9g", j ? "," : "", static_cast<double>(row[j]));
+        std::fprintf(f, "\n");
+    }
+    std::fclose(f);
+    std::fprintf(stderr, "dumped %zu sampled input vectors → %s\n", rows.size(), path.c_str());
 }
 }  // namespace
 
@@ -49,7 +82,7 @@ void on_signal(int) { g_stop = 1; }
 
 int main(int argc, char** argv) {
     std::vector<std::string> bundles;
-    std::string bundle_dir, export_kind, export_target, cpu_list;
+    std::string bundle_dir, export_kind, export_target, cpu_list, sample_dir;
     int period_ms = 100;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--bundle") == 0 && i + 1 < argc) bundles.push_back(argv[++i]);
@@ -57,6 +90,7 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "--period-ms") == 0 && i + 1 < argc) period_ms = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--export") == 0 && i + 1 < argc) export_kind = argv[++i];
         else if (std::strcmp(argv[i], "--export-target") == 0 && i + 1 < argc) export_target = argv[++i];
+        else if (std::strcmp(argv[i], "--sample-dir") == 0 && i + 1 < argc) sample_dir = argv[++i];
         else if (std::strcmp(argv[i], "--cpu") == 0 && i + 1 < argc) cpu_list = argv[++i];
         else { std::fprintf(stderr, "unknown arg: %s\n", argv[i]); return 2; }
     }
@@ -64,7 +98,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr,
             "usage: %s (--bundle <path>)... | --bundle-dir <dir>\n"
             "          [--period-ms <n>] [--export prometheus|file --export-target <path>]\n"
-            "          [--cpu <list e.g. 2,3>]\n", argv[0]);
+            "          [--sample-dir <dir>] [--cpu <list e.g. 2,3>]\n", argv[0]);
         return 2;
     }
 
@@ -102,24 +136,37 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, on_signal);
 
     // One window clock + export generation counter per model (independent).
+    // last_record holds each model's latest exported state so the heartbeat can
+    // re-publish it with fresh samples_total even when no window closed — the
+    // tap dying silently must be observable off-box (rate(samples_total)==0).
     std::vector<std::chrono::steady_clock::time_point> win_start(
         ws.size(), std::chrono::steady_clock::now());
     std::vector<uint64_t> generation(ws.size(), 0);
+    std::vector<driftmon::ExportRecord> last_record(ws.size());
+    for (size_t i = 0; i < ws.size(); ++i)
+        last_record[i].model_id = ws.at(i).bundle().model_id;
+    auto last_export = std::chrono::steady_clock::now();
+    const auto heartbeat = std::chrono::milliseconds(1000);
 
     while (!g_stop) {
         std::this_thread::sleep_for(std::chrono::milliseconds(period_ms));
         const auto now = std::chrono::steady_clock::now();
         const int64_t ts = static_cast<int64_t>(std::time(nullptr));
-        std::vector<driftmon::ExportRecord> records;
+        bool verdict_this_round = false;
         for (size_t i = 0; i < ws.size(); ++i) {
             const double elapsed = std::chrono::duration<double>(now - win_start[i]).count();
             driftmon::ModelVerdict v = ws.at(i).tick(elapsed);
             const std::string& id = ws.at(i).bundle().model_id;
             if (v.produced) {
-                std::printf("model=%s window_samples=%ld max_score=%.4f severity=%d\n",
-                            id.c_str(), v.window_samples, v.max_score, v.alarm ? 2 : 0);
+                std::printf("model=%s window_samples=%ld max_score=%.4f severity=%d kind=%s quality_alarm=%d\n",
+                            id.c_str(), v.window_samples, v.max_score, v.severity,
+                            v.kind.c_str(), v.quality_alarm ? 1 : 0);
                 std::fflush(stdout);
-                records.push_back(make_record(ws.at(i), v, ts, ++generation[i]));
+                last_record[i] = make_record(ws.at(i), v, ts, ++generation[i]);
+                verdict_this_round = true;
+                // Alarm ⇒ dump raw sampled inputs as retraining material.
+                if ((v.alarm || v.quality_alarm) && !sample_dir.empty())
+                    dump_samples(ws.at(i), sample_dir, generation[i]);
                 win_start[i] = std::chrono::steady_clock::now();
             } else if (v.warming_up) {
                 std::fprintf(stderr, "model=%s warming up (window_samples=%ld)\n",
@@ -127,9 +174,16 @@ int main(int argc, char** argv) {
                 win_start[i] = std::chrono::steady_clock::now();
             }
         }
-        // Best-effort export (R5.3): failure logged, loop continues.
-        if (exporter && !records.empty() && !exporter->write(records))
-            std::fprintf(stderr, "export write failed (continuing)\n");
+        // Export on every verdict, plus a heartbeat with fresh liveness counters.
+        if (exporter && (verdict_this_round || now - last_export >= heartbeat)) {
+            for (size_t i = 0; i < ws.size(); ++i) {
+                last_record[i].timestamp = ts;
+                last_record[i].samples_total = ws.at(i).samples_total();
+            }
+            if (!exporter->write(last_record))   // best-effort (R5.3)
+                std::fprintf(stderr, "export write failed (continuing)\n");
+            last_export = now;
+        }
     }
     std::fprintf(stderr, "driftmon worker stopping\n");
     return 0;

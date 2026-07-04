@@ -26,13 +26,42 @@ namespace driftmon {
 // Returns true if the tap is live; false ⇒ no-op mode (serving unaffected).
 bool tap_init(const char* model_id, const char* bundle_path);
 
+// ---- Multi-model handle API (A2) --------------------------------------------
+// A serving process hosting SEVERAL models opens one handle per model; the
+// single-model tap_init/tap_update_* functions above remain as the default-
+// handle convenience wrappers. Handle functions have identical hot-path cost.
+struct TapHandle;   // opaque
+
+// Open a tap for one model. Returns a handle even when the worker isn't up yet
+// (the handle starts in no-op mode and self-heals like the default tap);
+// returns nullptr only on invalid arguments. Cold: allocates, reads the bundle.
+TapHandle* tap_open(const char* model_id, const char* bundle_path);
+
+// Hot path, per inference. Same guarantees as tap_update_input/output.
+void tap_input(TapHandle* h, const float* feat, size_t n) noexcept;
+void tap_output(TapHandle* h, const float* out, size_t n) noexcept;
+
+// Close and free a handle. Same quiescence contract as tap_shutdown: no
+// concurrent tap_input/tap_output on this handle may be in flight.
+void tap_close(TapHandle* h) noexcept;
+
 // Per-inference hot path. `feat`/`out` point to the MODEL INPUT/OUTPUT space
 // (post-preprocess), length `n`. O(1) per element. Safe to call in no-op mode.
 void tap_update_input(const float* feat, size_t n) noexcept;
 void tap_update_output(const float* out, size_t n) noexcept;
 
-// Optional teardown at serving-process shutdown. Detaches the arena. Safe to
-// call even if tap_init failed or was never called.
+// Maintenance / self-heal for ALL open taps (the default one and every handle).
+// Call periodically from a NON-hot context (e.g. a 1 Hz housekeeping timer).
+// Recovers degraded taps (worker came up after serving) and re-attaches when
+// the worker rebuilt an arena (bundle update). Taps also self-heal without
+// integration changes: while degraded, the update functions trigger this
+// automatically about once per 2^20 calls — never on the healthy hot path.
+// Returns true if every open tap is live afterwards.
+bool tap_maintain() noexcept;
+
+// Optional teardown at serving-process shutdown. Unmaps the arena — call only
+// once serving threads are quiesced (no tap_update_* in flight). Safe to call
+// even if tap_init failed or was never called.
 void tap_shutdown() noexcept;
 
 }  // namespace driftmon

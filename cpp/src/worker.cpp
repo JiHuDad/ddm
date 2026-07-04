@@ -2,6 +2,7 @@
 #include "worker.h"
 
 #include <atomic>
+#include <set>
 #include <thread>
 
 #include <dirent.h>
@@ -25,7 +26,45 @@ SlotSpec slot_spec_from_bundle(const Bundle& b) {
     }
     spec.bin_offset[spec.n_features] = acc;
     spec.n_bins_total = acc;
+    // v2 sample ring: input vectors only.
+    uint32_t n_inputs = 0;
+    for (const auto& f : b.features) if (!f.is_output) ++n_inputs;
+    spec.n_inputs = n_inputs;
+    spec.ring_rows = n_inputs > 0 ? static_cast<uint32_t>(b.ring_rows) : 0;
+    spec.sample_every = static_cast<uint32_t>(b.sample_every);
     return spec;
+}
+
+std::vector<std::vector<float>> read_ring(SlotHeader* s) {
+    std::vector<std::vector<float>> rows;
+    if (s->ring_rows == 0 || s->n_inputs == 0) return rows;
+    const uint64_t head = s->ring_head.load(std::memory_order_acquire);
+    const uint64_t avail = head < s->ring_rows ? head : s->ring_rows;
+    rows.reserve(avail);
+    // Oldest-first over the last `avail` claims. The rowseq must equal the
+    // completed value for THIS claim (2k+2) — an "even and stable" check alone
+    // would accept a stale row from a previous lap when a writer has bumped
+    // ring_head but not yet stored the odd in-progress marker.
+    for (uint64_t k = head - avail; k < head; ++k) {
+        const uint32_t row = static_cast<uint32_t>(k % s->ring_rows);
+        const uint64_t expect = 2 * k + 2;
+        std::atomic<uint64_t>* rowseq = ring_rowseq(s, row);
+        if (rowseq->load(std::memory_order_acquire) != expect)
+            continue;                                // mid-claim, torn, or stale lap
+        std::vector<float> vals(s->n_inputs);
+        auto* src = reinterpret_cast<std::atomic<uint32_t>*>(ring_rowdata(s, row));
+        for (uint32_t j = 0; j < s->n_inputs; ++j) {
+            const uint32_t bits = src[j].load(std::memory_order_relaxed);
+            float f;
+            __builtin_memcpy(&f, &bits, sizeof(f));
+            vals[j] = f;
+        }
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (rowseq->load(std::memory_order_relaxed) != expect)
+            continue;                                // overwritten mid-read
+        rows.push_back(std::move(vals));
+    }
+    return rows;
 }
 
 std::vector<FeatureRef> feature_refs_from_bundle(const Bundle& b) {
@@ -35,11 +74,12 @@ std::vector<FeatureRef> feature_refs_from_bundle(const Bundle& b) {
         FeatureRef r;
         r.name = f.name;
         r.threshold = f.psi_threshold;
-        // Physical layout: [underflow, interior..., overflow]. Normalize ref_hist
-        // counts to ratios over the interior; underflow/overflow stay 0.
+        // Detectors see DISTRIBUTION bins only: [underflow, interior..., overflow].
+        // The NaN bin (physical index B+2) is a quality signal, deliberately
+        // excluded — a NaN flood must raise the quality alarm, not fake drift.
         long total = 0;
         for (long c : f.ref_hist) total += c;
-        r.ref_ratios.assign(f.interior_bins() + DRIFTMON_EXTRA_BINS, 0.0);
+        r.ref_ratios.assign(f.interior_bins() + 2, 0.0);
         if (total > 0) {
             const double denom = static_cast<double>(total);
             for (size_t k = 0; k < f.ref_hist.size(); ++k)
@@ -56,6 +96,20 @@ WindowDecision window_decision(long accumulated_samples, double elapsed_seconds,
     if (elapsed_seconds >= static_cast<double>(max_seconds))
         return WindowDecision::WarmupClose;
     return WindowDecision::Accumulate;
+}
+
+int Debouncer::update(int raw_level) {
+    if (raw_level > reported_) {
+        down_streak_ = 0;
+        if (++up_streak_ >= up_) { reported_ = raw_level; up_streak_ = 0; }
+    } else if (raw_level < reported_) {
+        up_streak_ = 0;
+        if (++down_streak_ >= down_) { reported_ = raw_level; down_streak_ = 0; }
+    } else {
+        up_streak_ = 0;
+        down_streak_ = 0;
+    }
+    return reported_;
 }
 
 uint64_t slot_swap_read(SlotHeader* s, std::vector<Histogram>& out,
@@ -110,25 +164,27 @@ bool ModelMonitor::init(const Bundle& b, std::string& err) {
     refs_ = feature_refs_from_bundle(b);   // ref_ratios over physical bins
     detectors_.clear();
     detectors_.resize(refs_.size());       // default-construct (vectors not copyable)
+    debounce_.assign(refs_.size(), Debouncer(b.up_windows, b.down_windows));
     for (size_t f = 0; f < refs_.size(); ++f) {
         for (const std::string& test : b.tests) {
             FeatureRef r = refs_[f];
-            std::unique_ptr<Detector> d;
+            BoundDetector bd;
+            bd.test = test;
             if (test == "psi") {
-                r.threshold = b.features[f].psi_threshold;
-                d = std::make_unique<PsiDetector>();
+                r.threshold = bd.threshold = b.features[f].psi_threshold;
+                bd.d = std::make_unique<PsiDetector>();
             } else if (test == "ks") {
-                r.threshold = b.features[f].ks_threshold;
-                d = std::make_unique<KsDetector>();
+                r.threshold = bd.threshold = b.features[f].ks_threshold;
+                bd.d = std::make_unique<KsDetector>();
             } else if (test == "cusum") {
-                d = std::make_unique<CusumDetector>();   // streaming (R3.4)
+                bd.d = std::make_unique<CusumDetector>();   // streaming (R3.4)
             } else if (test == "adwin") {
-                d = std::make_unique<AdwinDetector>();    // streaming (R3.4)
+                bd.d = std::make_unique<AdwinDetector>();    // streaming (R3.4)
             } else {
                 continue;   // unknown detector name ignored (forward-compat)
             }
-            d->configure(r);
-            detectors_[f].push_back(std::move(d));
+            bd.d->configure(r);
+            detectors_[f].push_back(std::move(bd));
         }
     }
     reset_window();
@@ -138,8 +194,10 @@ bool ModelMonitor::init(const Bundle& b, std::string& err) {
 void ModelMonitor::reset_window() {
     accum_samples_ = 0;
     accum_.assign(refs_.size(), Histogram{});
+    // Accumulate over the FULL physical layout (incl. the NaN bin).
     for (size_t f = 0; f < refs_.size(); ++f)
-        accum_[f].counts.assign(refs_[f].ref_ratios.size(), 0);
+        accum_[f].counts.assign(
+            bundle_.features[f].interior_bins() + DRIFTMON_EXTRA_BINS, 0);
 }
 
 ModelVerdict ModelMonitor::evaluate() {
@@ -147,17 +205,82 @@ ModelVerdict ModelMonitor::evaluate() {
     v.produced = true;
     v.window_samples = accum_samples_;
     v.per_feature.resize(detectors_.size());
+    v.feature_severity.resize(detectors_.size());
+    v.quality.resize(detectors_.size());
+    std::set<std::string> alarmed_tests;   // which detector kinds fired (R2)
+    bool any_out_of_range_alarm = false;
     for (size_t f = 0; f < detectors_.size(); ++f) {
+        const Histogram& full = accum_[f];              // physical: [... overflow, nan]
+        const uint64_t nan_count = full.counts.empty() ? 0 : full.counts.back();
+
+        // Distribution view for detectors: NaN bin stripped, total adjusted.
+        Histogram dist;
+        dist.counts.assign(full.counts.begin(),
+                           full.counts.empty() ? full.counts.end()
+                                               : full.counts.end() - 1);
+        dist.total = full.total - nan_count;
+
         DriftResult feat;   // worst detector for this feature
+        int raw_level = 0;  // 0/1/2 from each detector's OWN threshold (P4)
         for (auto& det : detectors_[f]) {
-            DriftResult r = det->eval(accum_[f]);
+            DriftResult r = det.d->eval(dist);
             if (r.score > feat.score) feat.score = r.score;
-            if (r.alarm) feat.alarm = true;
+            if (r.alarm) {
+                feat.alarm = true;
+                alarmed_tests.insert(det.test);   // feeds drift-kind (R2)
+            }
+            int lvl = 0;
+            if (r.alarm) lvl = 2;
+            else if (det.threshold > 0.0 &&
+                     r.score >= bundle_.warn_ratio * det.threshold) lvl = 1;
+            if (lvl > raw_level) raw_level = lvl;
         }
         v.per_feature[f] = feat;
+        v.feature_severity[f] = debounce_[f].update(raw_level);
+        if (v.feature_severity[f] > v.severity) v.severity = v.feature_severity[f];
         if (feat.score > v.max_score) v.max_score = feat.score;
-        if (feat.alarm) v.alarm = true;
+
+        // Data-quality signals (v2): pipeline breakage, not drift.
+        FeatureQuality& q = v.quality[f];
+        if (full.total > 0)
+            q.nan_ratio = static_cast<double>(nan_count) /
+                          static_cast<double>(full.total);
+        if (dist.total > 0) {
+            const uint64_t oor = dist.counts.front() +
+                                 (dist.counts.size() > 1 ? dist.counts.back() : 0);
+            q.oor_ratio = static_cast<double>(oor) / static_cast<double>(dist.total);
+            // Constant feature: everything lands in one INTERIOR bin while the
+            // reference was spread — upstream likely feeding a stuck/default
+            // value. Boundary bins are deliberately excluded: mass piling into
+            // underflow/overflow is regime escape (out_of_range → retrain and
+            // re-bin), and must not be misrouted as a data_quality alarm,
+            // which takes precedence in the kind classification.
+            uint64_t max_interior = 0;
+            for (size_t k = 1; k + 1 < dist.counts.size(); ++k)
+                if (dist.counts[k] > max_interior) max_interior = dist.counts[k];
+            double ref_max = 0.0;
+            for (double r : refs_[f].ref_ratios) if (r > ref_max) ref_max = r;
+            q.constant =
+                static_cast<double>(max_interior) / static_cast<double>(dist.total) >= 0.99 &&
+                ref_max <= 0.9;
+        }
+        q.out_of_range = q.oor_ratio > bundle_.oor_ratio_max;
+        q.alarm = q.nan_ratio > bundle_.nan_ratio_max || q.constant;
+        if (q.alarm) v.quality_alarm = true;
+        if (q.out_of_range && feat.alarm) any_out_of_range_alarm = true;
     }
+    v.alarm = (v.severity == 2);   // model alarm is the DEBOUNCED significant level
+
+    // Classify the change kind (R2) — precedence: broken pipeline beats drift
+    // explanations; regime escape beats shape analysis; the streaming shape
+    // (abrupt vs sustained) beats the generic distribution verdict.
+    if (v.quality_alarm)                          v.kind = "data_quality";
+    else if (!v.alarm)                            v.kind = "none";
+    else if (any_out_of_range_alarm)              v.kind = "out_of_range";
+    else if (alarmed_tests.count("adwin"))        v.kind = "abrupt";
+    else if (alarmed_tests.count("cusum"))        v.kind = "sustained";
+    else                                          v.kind = "distribution";
+
     v.histograms = accum_;   // snapshot for export (R5.1)
     return v;
 }
@@ -176,6 +299,7 @@ ModelVerdict ModelMonitor::tick(double elapsed_seconds) {
         accum_[f].total = total;
     }
     accum_samples_ += static_cast<long>(n);
+    samples_total_ += n;
 
     switch (window_decision(accum_samples_, elapsed_seconds,
                             bundle_.min_samples, bundle_.max_seconds)) {

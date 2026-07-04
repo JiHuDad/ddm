@@ -45,6 +45,24 @@ enum class WindowDecision {
 WindowDecision window_decision(long accumulated_samples, double elapsed_seconds,
                                long min_samples, long max_seconds);
 
+// Anti-flapping severity debounce (pure, unit-testable). A raw level must be
+// observed ABOVE the reported level for `up_windows` consecutive updates to
+// raise it, and BELOW for `down_windows` consecutive updates to lower it.
+// With the defaults (up=1, down=2) an alternating alarm/clean sequence reports
+// steady alarm instead of flapping — the storm pattern operators learn to ignore.
+class Debouncer {
+public:
+    Debouncer(int up_windows = 1, int down_windows = 2)
+        : up_(up_windows), down_(down_windows) {}
+    int update(int raw_level);
+    int reported() const { return reported_; }
+
+private:
+    int up_, down_;
+    int reported_ = 0;
+    int up_streak_ = 0, down_streak_ = 0;
+};
+
 // --- Swap + read (the lock-free reader side, SPEC §6.2) ----------------------
 
 // Freeze the active buffer (publish a swap), drain in-flight writers on the old
@@ -54,15 +72,47 @@ WindowDecision window_decision(long accumulated_samples, double elapsed_seconds,
 uint64_t slot_swap_read(SlotHeader* s, std::vector<Histogram>& out,
                         uint64_t grace_spins = 0);
 
+// Snapshot the sample ring (v2): the most recent sampled raw INPUT vectors,
+// oldest-first. Torn / in-progress rows are skipped. This is the retraining
+// material a drift alarm gets dumped with (R-R1) — histograms alone cannot
+// reconstruct training data.
+std::vector<std::vector<float>> read_ring(SlotHeader* s);
+
 // --- Per-model monitor -------------------------------------------------------
+
+// Per-feature data-quality signals (v2). Quality ≠ drift: a NaN flood or a
+// feature going constant means the upstream pipeline broke — retraining on
+// such data would be poison, so it is alarmed on a separate channel.
+struct FeatureQuality {
+    double nan_ratio = 0.0;      // NaN share of all samples in the window
+    double oor_ratio = 0.0;      // under+overflow share of non-NaN samples
+    bool   constant = false;     // one bin holds ~everything while the ref was spread
+    bool   out_of_range = false; // oor_ratio exceeded bundle.oor_ratio_max (drift-kind input)
+    bool   alarm = false;        // nan_ratio over threshold OR constant
+};
 
 struct ModelVerdict {
     bool produced = false;       // false while accumulating or warming up
     bool warming_up = false;     // window closed by time but below min_samples
     long window_samples = 0;     // samples in the closed/active window
     double max_score = 0.0;
-    bool alarm = false;
+    // Debounced severity: 0 STABLE / 1 WARNING / 2 SIGNIFICANT. Levels come
+    // from each feature's own detector thresholds (bundle-driven, P4) — never
+    // from hardcoded score cutoffs — then pass the per-feature Debouncer.
+    int severity = 0;
+    bool alarm = false;          // == (severity == 2)
+    bool quality_alarm = false;  // any feature's quality alarm (v2)
+    // What KIND of change fired (R2) — routes the off-box response:
+    //   "data_quality" → fix the pipeline; retraining on this data is poison
+    //   "out_of_range" → new regime beyond the edges; retrain AND re-bin
+    //   "abrupt"       → step change (ADWIN); investigate cause, full retrain
+    //   "sustained"    → gradual trend (CUSUM); fine-tuning candidate
+    //   "distribution" → shape shift within range (PSI/KS); retrain candidate
+    //   "none"         → no alarm
+    std::string kind = "none";
     std::vector<DriftResult> per_feature;
+    std::vector<int> feature_severity;     // debounced, parallel to per_feature
+    std::vector<FeatureQuality> quality;   // parallel to per_feature (v2)
     std::vector<Histogram> histograms;   // per-feature snapshot at evaluate time (for export)
 };
 
@@ -82,19 +132,34 @@ public:
     Arena& arena() { return arena_; }
     const Bundle& bundle() const { return bundle_; }
 
+    // Cumulative samples drained from the tap since this worker started —
+    // never reset by window closes. rate(samples_total)==0 while serving is
+    // live ⇒ the tap is dead/degraded (monitoring-of-the-monitoring).
+    uint64_t samples_total() const { return samples_total_; }
+
     ~ModelMonitor();
 
 private:
     void reset_window();
     ModelVerdict evaluate();
 
+    // A detector bound to its test name + alarm threshold (threshold 0 for the
+    // streaming detectors, whose alarm is internal — they report binary levels).
+    struct BoundDetector {
+        std::string test;
+        double threshold = 0.0;
+        std::unique_ptr<Detector> d;
+    };
+
     Bundle bundle_;
     Arena arena_;
     std::vector<FeatureRef> refs_;
     // Per-feature list of detectors (PSI/KS/... selected by bundle.tests).
-    std::vector<std::vector<std::unique_ptr<Detector>>> detectors_;
+    std::vector<std::vector<BoundDetector>> detectors_;
+    std::vector<Debouncer> debounce_;    // per-feature severity debounce
     std::vector<Histogram> accum_;   // per-feature accumulated counts this window
     long accum_samples_ = 0;
+    uint64_t samples_total_ = 0;
     bool reused_arena_ = false;
 };
 

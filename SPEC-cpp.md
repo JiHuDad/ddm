@@ -215,3 +215,47 @@ Phase 3 범위(SPEC §9): export + ADWIN/CUSUM 스트리밍 + 코어 핀 + 벤�
 
 **Phase 1·2·3 = 전 AC(AC1~AC10) 충족.** 운영 연계(실제 MinIO 업로드/HTTP 노출, RT 커널 실측,
 번들 산출 파이프라인 §10 Q1)는 off-box·배포 환경 영역으로 본 SPEC 범위 밖.
+
+### 크로스-프로세스 E2E 데모 (실데이터 통합 검증)
+
+`cpp/examples/deepmimo_cpp/` + ctest `deepmimo_cpp_e2e`: **별도 worker 프로세스 + 별도 tap
+프로세스**가 진짜 POSIX shm으로 통신하는 전체 파이프라인을 DeepMIMO Zone A(LOS)/Zone E(NLOS)
+합성 데이터로 검증한다. `gen_zones.py`(데이터) → `make_bundle.py`(분위수 번들) → `driftmon_worker`
+(shm 생성·export) ⇄ `tap_driver`(CSV를 진짜 탭으로 재생). 결과: **Zone A → max PSI≈0.04 →
+severity 0(STABLE)**, **Zone E → max PSI≈13.8 → severity 2(SIGNIFICANT)** 를 Prometheus export로
+자동 단언. AC3/AC4를 합성 주입이 아니라 **크로스-프로세스 실데이터 흐름으로** 재확인한다.
+(엔진 비의존이라 실제 ONNX 모델은 불필요 — CSV 피처 스트림이 모델 입력 공간 대역.)
+
+## 14. 보강 라운드 (REVIEW.md P1~P5) 구현 노트
+
+[cpp/REVIEW.md](cpp/REVIEW.md) 검토에서 확정한 보강 5건. 추가 결정:
+
+15. **탭 자기치유 (P1, A1).** `tap_maintain()`이 degraded 탭 복구 + stale arena(fstat
+    `nlink==0`) 재연결. degraded 상태에선 hot path가 `g_tap_retry_calls`(기본 2^20)마다 자동
+    재시도 — 건강한 hot path에는 0 비용. **lock-free 재구성**: hot path는 live/slot/cfg를
+    atomic으로 읽고, 유지보수는 새 TapConfig/매핑을 publish 후 옛것을 **해제하지 않고 유기**
+    (in-flight writer가 ghost 메모리에 무해하게 완료; 누수는 재구성 이벤트당 1회로 유계).
+    콜드 연산은 mutex 직렬화, hot path는 mutex를 절대 안 잡음.
+16. **탭 생존 export (P1).** `ModelMonitor::samples_total()`(누적, 리셋 없음) +
+    `driftmon_samples_total` 메트릭. worker는 판정 없어도 ~1초마다 heartbeat export —
+    `rate(samples_total)==0`이면 탭이 조용히 죽은 것(무감시 공백의 가시화).
+17. **ABI v2 (P2).** `SHM_VERSION=2`: 피처당 **NaN 전용 bin**(EXTRA_BINS 2→3; NaN은 이제
+    드롭이 아니라 집계) + 샘플 링 필드 + reserved. detector는 NaN bin **제외**(분포 검정과
+    품질 신호 분리 — NaN 홍수가 드리프트로 위장하면 안 됨). 품질 채널: `nan_ratio`(임계
+    `quality.nan_ratio_max`, 기본 1%), **상수화 감지**(한 bin ≥99% && ref 최대 ≤90%),
+    `oor_ratio`(임계 초과 시 out_of_range 플래그 — 품질 알람이 아니라 drift-kind 입력).
+18. **샘플 링 (P3, R1).** 히스토그램으론 재학습 불가 → 탭이 **완전한 입력 벡터를 1/N 계통
+    샘플링**으로 shm 링(row별 미니 seqlock, float는 atomic u32 비트로 저장)에 보존.
+    worker `--sample-dir`: 알람 시 링을 CSV로 덤프(세대별 1파일) = 재학습 재료 핸드오프.
+    번들 `sampling{every_n(100), ring_rows(256)}`; hot path 추가 비용 = relaxed fetch_add 1회
+    (벤치 p50 ~72-84ns 유지).
+19. **severity 번들화 + 디바운스 (P4, A4).** 하드코딩 제거 — severity는 각 detector **자신의
+    임계** 기준(알람=2, `warn_ratio`×임계=1; 번들 `alarm{warn_ratio(0.5), up_windows(1),
+    down_windows(2)}`), 피처별 `Debouncer` 통과 후 보고. 기본값에서 알람은 즉시 뜨되
+    임계 근처 플래핑은 안정 알람으로 보고(폭풍 억제), 2회 연속 정상이어야 해제.
+20. **다모델 탭 + drift_kind (P5, A2·R2).** `TapHandle` API로 서빙 프로세스당 N모델(핸들별
+    자기치유, hot-path 비용 동일; 기존 API는 기본 핸들 래퍼). 판정에 **kind 분류** —
+    data_quality(파이프라인 수리, 재학습 금지) > out_of_range(재학습+bin 재산출) >
+    abrupt(원인조사→전체 재학습) > sustained(fine-tune 후보) > distribution(재학습 후보) —
+    를 실어 export(`driftmon_drift_kind{model,kind}`), off-box 대응 라우팅의 근거를 제공.
+    E2E는 출력 드리프트(strongest_angle=출력)·kind(out_of_range)·샘플 덤프까지 단언.

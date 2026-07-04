@@ -34,6 +34,24 @@ struct Bundle {
     std::string model_id;
     long min_samples = 0;              // window.min_samples (default applied if unset)
     long max_seconds = 0;              // window.max_seconds (default applied if unset)
+    // Data-quality gates (optional "quality" block). NaN influx / a feature
+    // going constant means the PIPELINE broke — flagged separately from drift
+    // so operators don't chase a retrain when the fix is upstream repair.
+    double nan_ratio_max = 0.01;       // quality alarm if NaN share exceeds this
+    double oor_ratio_max = 0.05;       // out-of-range flag (drift-kind input, not quality alarm)
+    // Sample ring (optional "sampling" block): preserve raw INPUT vectors as
+    // retraining material — histograms cannot reconstruct training data. The
+    // tap keeps 1 in every_n input vectors in a shm ring of ring_rows rows
+    // (most-recent wins); the worker dumps it on alarm. ring_rows 0 disables.
+    long sample_every = 100;
+    long ring_rows = 256;
+    // Alarm policy (optional "alarm" block). warn_ratio: WARNING level at
+    // score >= warn_ratio * threshold. Debounce: a level must hold for
+    // up_windows consecutive verdicts to be reported higher / down_windows to
+    // be reported lower — kills alarm flapping near the threshold.
+    double warn_ratio = 0.5;
+    int up_windows = 1;
+    int down_windows = 2;
     std::vector<std::string> tests;    // active detectors (e.g. "psi", "ks")
     std::vector<BundleFeature> features;  // inputs first, then outputs
 

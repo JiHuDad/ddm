@@ -153,3 +153,38 @@
 Phase 1·2·3 완료(AC1~AC10). 다음 작업·진입점·미해결 질문은 **[cpp/ROADMAP.md](cpp/ROADMAP.md)**
 에 정리. 요약: Phase 4(모델 의존성 메타데이터 슬롯 예약, 귀속 미구현) + 운영 연계(단일 arena
 옵션, hot-add, 실제 export 전송, 정식 ADWIN, KS 통계화, RT 실측).
+
+## driftmon-cpp — 크로스-프로세스 E2E 데모 (완료)
+
+부품 단위/통합 테스트를 넘어, 별도 프로세스 + 실데이터성 드리프트로 전 구간 검증.
+
+- [x] **구현:** `cpp/examples/deepmimo_cpp/make_bundle.py` — 학습 CSV → 신규 번들 스키마
+      (분위수 비닝, `make_reference.py` 로직 재사용).
+- [x] **구현:** `tap_driver.cpp` — "서빙 프로세스" 대역. 번들로 model_id·입력 순서 학습 후
+      CSV 행을 진짜 `tap_update_input`으로 재생(CRLF 안전).
+- [x] **구현:** `run_demo.py` — gen_zones → make_bundle → worker(별도 프로세스, shm·export)
+      ⇄ tap_driver(별도 프로세스) → Prometheus export severity 폴링 검증. 2페이즈(A/E) 각
+      fresh worker.
+- [x] **테스트:** ctest `deepmimo_cpp_e2e` — Zone A(max_score≈0.04)→STABLE, Zone E(≈13.8)→
+      SIGNIFICANT. 3회 반복 안정(~0.46s). CMake DRIFTMON_ENABLE_CPP 블록에 포함(CI +cpp/all-on).
+
+## driftmon-cpp 보강 라운드 — REVIEW.md P1~P5 (완료)
+
+정본 [cpp/REVIEW.md](cpp/REVIEW.md)(검토 보고서) + [SPEC-cpp.md](SPEC-cpp.md) §14 결정 로그.
+데이터 드리프트 외 모니터링(품질·생존) + 재학습 루프 재료 확보가 목적.
+
+- [x] **P1 구현/테스트:** 탭 자기치유 — `tap_maintain()` + degraded 자동 재시도 + stale
+      arena(nlink==0) 재연결(lock-free 재구성, 유기 방식). worker heartbeat export +
+      `driftmon_samples_total`(탭 생존 가시화). `test_tap_reconnect`.
+- [x] **P2 구현/테스트:** ABI v2 — NaN 전용 bin(EXTRA_BINS 2→3), 품질 채널(nan_ratio/
+      상수화=품질 알람, oor_ratio=drift-kind 입력), detector는 NaN 제외. `test_quality`.
+- [x] **P3 구현/테스트:** 샘플 링 — 입력 벡터 1/N 계통 샘플링 → shm 링(row seqlock),
+      worker `--sample-dir` 알람 시 CSV 덤프(재학습 재료). `test_sample_ring`.
+- [x] **P4 구현/테스트:** severity 번들화(`alarm{warn_ratio,up_windows,down_windows}`,
+      detector 자신의 임계 기준) + 피처별 디바운스(플래핑 억제). `test_debounce`.
+- [x] **P5 구현/테스트:** 다모델 `TapHandle`(프로세스당 N모델, 핸들별 자기치유) +
+      drift_kind 분류(data_quality/out_of_range/abrupt/sustained/distribution → off-box
+      대응 라우팅) + E2E 확장(출력 드리프트·kind·샘플 덤프 단언). `test_tap_handles`.
+- [x] **검증:** 전 옵션 ON 25/25(코어 6 + cpp 18 + audit), OFF byte-for-byte 불변,
+      벤치 p50 ~72ns·할당 0, E2E: Zone E → severity 2 + kind=out_of_range + 출력 알람 +
+      재학습 샘플 20행 덤프.

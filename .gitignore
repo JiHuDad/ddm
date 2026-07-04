@@ -23,3 +23,5 @@ Testing/
 __pycache__/
 *.pyc
 *.pyo
+build-*/
+build-cpp/
