@@ -1,3 +1,0 @@
-{"model_id":"qual","window":{"min_samples":100,"max_seconds":600},
-  "quality":{"nan_ratio_max":0.05,"oor_ratio_max":0.10},
-  "features":[{"name":"f","bin_edges":[0,1,2,3,4],"ref_hist":[100,100,100,100]}]}

@@ -1,4 +1,0 @@
-{"model_id":"ring","window":{"min_samples":100000,"max_seconds":100000},
-  "sampling":{"every_n":2,"ring_rows":4},
-  "features":[{"name":"a","bin_edges":[0,1,2,3,4],"ref_hist":[1,1,1,1]},
-              {"name":"b","bin_edges":[0,10,20,30,40],"ref_hist":[1,1,1,1]}]}
