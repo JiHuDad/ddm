@@ -41,12 +41,16 @@ std::vector<std::vector<float>> read_ring(SlotHeader* s) {
     const uint64_t head = s->ring_head.load(std::memory_order_acquire);
     const uint64_t avail = head < s->ring_rows ? head : s->ring_rows;
     rows.reserve(avail);
-    // Oldest-first over the last `avail` claims; skip torn/in-progress rows.
+    // Oldest-first over the last `avail` claims. The rowseq must equal the
+    // completed value for THIS claim (2k+2) — an "even and stable" check alone
+    // would accept a stale row from a previous lap when a writer has bumped
+    // ring_head but not yet stored the odd in-progress marker.
     for (uint64_t k = head - avail; k < head; ++k) {
         const uint32_t row = static_cast<uint32_t>(k % s->ring_rows);
+        const uint64_t expect = 2 * k + 2;
         std::atomic<uint64_t>* rowseq = ring_rowseq(s, row);
-        const uint64_t s1 = rowseq->load(std::memory_order_acquire);
-        if (s1 & 1) continue;                        // writer mid-copy
+        if (rowseq->load(std::memory_order_acquire) != expect)
+            continue;                                // mid-claim, torn, or stale lap
         std::vector<float> vals(s->n_inputs);
         auto* src = reinterpret_cast<std::atomic<uint32_t>*>(ring_rowdata(s, row));
         for (uint32_t j = 0; j < s->n_inputs; ++j) {
@@ -56,7 +60,8 @@ std::vector<std::vector<float>> read_ring(SlotHeader* s) {
             vals[j] = f;
         }
         std::atomic_thread_fence(std::memory_order_acquire);
-        if (rowseq->load(std::memory_order_relaxed) != s1) continue;  // overwritten mid-read
+        if (rowseq->load(std::memory_order_relaxed) != expect)
+            continue;                                // overwritten mid-read
         rows.push_back(std::move(vals));
     }
     return rows;
@@ -244,14 +249,19 @@ ModelVerdict ModelMonitor::evaluate() {
             const uint64_t oor = dist.counts.front() +
                                  (dist.counts.size() > 1 ? dist.counts.back() : 0);
             q.oor_ratio = static_cast<double>(oor) / static_cast<double>(dist.total);
-            // Constant feature: everything lands in one bin while the reference
-            // was spread — upstream likely feeding a stuck/default value.
-            uint64_t max_bin = 0;
-            for (uint64_t c : dist.counts) if (c > max_bin) max_bin = c;
+            // Constant feature: everything lands in one INTERIOR bin while the
+            // reference was spread — upstream likely feeding a stuck/default
+            // value. Boundary bins are deliberately excluded: mass piling into
+            // underflow/overflow is regime escape (out_of_range → retrain and
+            // re-bin), and must not be misrouted as a data_quality alarm,
+            // which takes precedence in the kind classification.
+            uint64_t max_interior = 0;
+            for (size_t k = 1; k + 1 < dist.counts.size(); ++k)
+                if (dist.counts[k] > max_interior) max_interior = dist.counts[k];
             double ref_max = 0.0;
             for (double r : refs_[f].ref_ratios) if (r > ref_max) ref_max = r;
             q.constant =
-                static_cast<double>(max_bin) / static_cast<double>(dist.total) >= 0.99 &&
+                static_cast<double>(max_interior) / static_cast<double>(dist.total) >= 0.99 &&
                 ref_max <= 0.9;
         }
         q.out_of_range = q.oor_ratio > bundle_.oor_ratio_max;

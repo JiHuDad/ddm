@@ -78,6 +78,36 @@ TEST(ring_disabled_is_a_noop) {
     tap_shutdown();
 }
 
+TEST(stale_claim_not_accepted) {
+    // Codex review fix: a writer bumps ring_head BEFORE marking its row odd.
+    // If the reader runs in that window, the claimed-but-unwritten row still
+    // holds the previous lap's even rowseq — it must be rejected (rowseq must
+    // equal 2k+2 for THIS claim), not returned as fresh data.
+    Bundle b = setup(kRingJson, "ring_bundle.json");
+    std::string err;
+    ModelMonitor mon;
+    CHECK(mon.init(b, err));
+    CHECK(tap_init("ring", "ring_bundle.json"));
+    detail::g_tap.sample_ctr.store(0);
+
+    // Fill exactly one lap: claims 0..3 land in rows 0..3 (every_n=2 ⇒ 8 feeds).
+    for (int i = 0; i < 8; ++i) {
+        float v[2] = {static_cast<float>(i), static_cast<float>(i)};
+        tap_update_input(v, 2);
+    }
+    CHECK(mon.slot()->ring_head.load() == 4);
+    CHECK(read_ring(mon.slot()).size() == 4);
+
+    // Simulate a writer paused between claiming (head++) and writing: claim
+    // k=4 targets row 0, whose rowseq is still 2 (claim 0's completed value).
+    mon.slot()->ring_head.fetch_add(1);
+    auto rows = read_ring(mon.slot());
+    CHECK(rows.size() == 3);               // claims 1..3 only — stale row 0 rejected
+    CHECK_NEAR(rows[0][0], 2.0, 1e-6);     // oldest surviving = claim 1 (vector #2)
+
+    tap_shutdown();
+}
+
 TEST(short_vector_not_sampled) {
     Bundle b = setup(kRingJson, "ring_bundle.json");
     std::string err;

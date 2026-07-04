@@ -41,6 +41,14 @@ def compute_feature(values, num_buckets):
         if edges[i] <= edges[i - 1]:
             edges[i] = edges[i - 1] + eps
 
+    # Widen the final edge so training samples EQUAL to the observed max stay
+    # in the last interior bucket under the tap's boundary semantics
+    # (x >= last edge → overflow bin, deliberately a drift signal). Otherwise a
+    # stable replay of clipped/repeated-max data shows overflow mass against a
+    # zero-overflow reference and reads as false out-of-range drift. The bump
+    # must survive the tap's float32 cast, hence a float32-scale epsilon.
+    edges[-1] += max(abs(edges[-1]) * 1e-5, 1e-6)
+
     counts = [0] * num_buckets
     for v in finite:
         if v < edges[0]:

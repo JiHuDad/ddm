@@ -108,6 +108,26 @@ TEST(out_of_range_flag_without_quality_alarm) {
     CHECK(v.alarm);                    // but PSI sees the escaped mass as drift
 }
 
+TEST(boundary_mass_is_not_constant) {
+    // Codex review fix: ~all mass in a BOUNDARY bin is regime escape, not a
+    // stuck feature. It must route as out_of_range (retrain + re-bin), never
+    // as data_quality (pipeline repair, retraining forbidden), which would win
+    // by kind precedence.
+    Bundle b = bundle();
+    std::string err;
+    ModelMonitor mon;
+    CHECK(mon.init(b, err));
+
+    inject(mon.slot(), {0, 0, 0, 0, 0, 500, 0});   // 100% overflow
+    ModelVerdict v = mon.tick(1.0);
+    CHECK(v.produced);
+    CHECK(!v.quality[0].constant);     // boundary concentration ≠ constant
+    CHECK(!v.quality_alarm);
+    CHECK(v.quality[0].out_of_range);
+    CHECK(v.alarm);
+    CHECK(v.kind == "out_of_range");   // correctly routed to retrain-and-rebin
+}
+
 TEST(clean_window_no_quality_signals) {
     Bundle b = bundle();
     std::string err;
